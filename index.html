@@ -74,9 +74,9 @@
     .chart-area{position:relative;border-top:1px solid rgba(38,50,59,.68)}
     .chart-host{width:100%}.chart-main{height:432px}.chart-small{height:115px;border-top:1px solid rgba(38,50,59,.78)}
     .panel-title{position:absolute;z-index:3;left:13px;top:8px;padding:2px 5px;background:rgba(8,12,16,.77);color:#a4b2bb;font-size:9px;font-weight:850;pointer-events:none}
-    .level-strip{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;margin-top:0;border-top:1px solid var(--line);background:#091015}
+    .level-strip{display:grid;grid-template-columns:1fr 1fr 1fr 1.25fr;gap:0;margin-top:0;border-top:1px solid var(--line);background:#091015}
     .strip-cell{min-height:80px;padding:12px 14px;border-right:1px solid var(--line)}.strip-cell:last-child{border-right:0}
-    .strip-cell h3{margin:0 0 7px;color:#87949c;font-size:9px;font-weight:900;letter-spacing:.1em;text-transform:uppercase}.strip-cell p{margin:0;color:#dce6e2;font-size:11px;line-height:1.55}.strip-cell .res{color:#ff8286}.strip-cell .sup{color:#6fdf9c}.strip-cell .note{color:#d7bd5f}
+    .strip-cell h3{margin:0 0 7px;color:#87949c;font-size:9px;font-weight:900;letter-spacing:.1em;text-transform:uppercase}.strip-cell p{margin:0;color:#dce6e2;font-size:11px;line-height:1.55}.strip-cell .res{color:#ff8286}.strip-cell .sup{color:#6fdf9c}.strip-cell .gap{color:#e6cc72}.strip-cell .note{color:#d7bd5f}
     .levels-header{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:11px}.levels-header h2{margin:0;font-size:11px;font-weight:900;letter-spacing:.06em}.levels-header span{color:#7c8991;font-size:9px}
     .current-box{display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid #2e6f57;border-radius:8px;background:linear-gradient(110deg,rgba(24,108,75,.21),rgba(16,38,31,.24));padding:10px 11px;margin-bottom:10px}.current-box span{color:#a3e3c7;font-size:10px;font-weight:800}.current-box b{color:#eaffeF;font-size:19px;letter-spacing:-.05em}
     .level-group{margin:12px 0}.level-title{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;color:#8b979e;font-size:9px;font-weight:900;letter-spacing:.1em;text-transform:uppercase}.level-title.res{color:#ff8c90}.level-title.sup{color:#75dc9b}
@@ -97,14 +97,14 @@
       <a class="brand" href="#chart" aria-label="IDX Chart Lab"><span class="brand-mark">◒</span><span>IDX Chart Lab</span></a>
       <div class="tools"><i></i><span>TradingView Lightweight Charts</span></div>
       <div class="spacer"></div>
-      <span class="data-badge">Level otomatis</span>
+      <span class="data-badge">Level &amp; gap otomatis</span>
     </header>
 
     <main class="workspace" id="chart">
       <section class="heading">
         <div>
           <p class="eyebrow">Chart saham Indonesia</p>
-          <h1>Support &amp; resistance otomatis</h1>
+          <h1>Support, resistance &amp; gap otomatis</h1>
         </div>
         <p class="disclaimer">Level dihitung dari swing pivot dan clustering volatilitas pada candle aktif. Ini alat analisis teknikal, bukan rekomendasi beli atau jual.</p>
       </section>
@@ -143,6 +143,7 @@
               <div class="analysis-row"><span>RSI 14</span><b id="rsi-readout">—</b></div>
               <div class="analysis-row"><span>Harga saat ini</span><b id="panel-price">—</b></div>
               <div class="analysis-row"><span>Level kunci</span><b id="key-level">—</b></div>
+              <div class="analysis-row"><span>Gap terdekat</span><b id="gap-readout">—</b></div>
             </section>
             <section class="stack">
               <h2 class="green">Skenario teknikal</h2>
@@ -160,8 +161,8 @@
               <div class="quote"><strong id="quote-price">—</strong><span id="quote-change">—</span></div>
             </div>
             <div class="chart-area">
-              <div class="panel-title">CANDLE • MA 20 / 50 / 100 / 200 • R/S OTOMATIS</div>
-              <div class="chart-host chart-main" id="price-chart" aria-label="Grafik candlestick dengan garis support dan resistance otomatis"></div>
+              <div class="panel-title">CANDLE • MA 20 / 50 / 100 / 200 • R/S &amp; GAP OTOMATIS</div>
+              <div class="chart-host chart-main" id="price-chart" aria-label="Grafik candlestick dengan garis support, resistance, dan gap otomatis"></div>
               <div class="loading show" id="loading"><span><i></i>Memuat data candle…</span></div>
             </div>
             <div class="chart-area">
@@ -180,6 +181,7 @@
             <div class="level-strip">
               <div class="strip-cell"><h3>Resistance</h3><p class="res" id="res-summary">—</p></div>
               <div class="strip-cell"><h3>Support</h3><p class="sup" id="sup-summary">—</p></div>
+              <div class="strip-cell"><h3>Gap terbuka</h3><p class="gap" id="gap-summary">—</p></div>
               <div class="strip-cell"><h3>Pembacaan</h3><p class="note" id="summary-note">Menunggu data harga…</p></div>
             </div>
           </section>
@@ -195,7 +197,7 @@
               <div class="level-title sup"><span>Support</span><span>Swing low</span></div>
               <div id="support-list"></div>
             </div>
-            <p class="method"><b>Cara hitung:</b> swing high/low dikumpulkan lalu dikelompokkan memakai rentang ATR. Semakin banyak sentuhan, semakin kuat levelnya.</p>
+            <p class="method"><b>Cara hitung:</b> swing high/low dikelompokkan memakai rentang ATR. Gap ditandai bila rentang harga antar-candle lebih besar dari ambang volatilitas; statusnya tertutup setelah harga kembali menyentuh batas gap.</p>
             <div class="watchlist" id="watchlist" aria-label="Pilihan ticker"></div>
           </aside>
         </div>
@@ -227,7 +229,7 @@
         symbol: document.getElementById("symbol-title"), company: document.getElementById("company"), ohlc: document.getElementById("ohlc"),
         panelPrice: document.getElementById("panel-price"), current: document.getElementById("current-price"), frame: document.getElementById("level-frame"),
         resList: document.getElementById("resistance-list"), supList: document.getElementById("support-list"), resSummary: document.getElementById("res-summary"),
-        supSummary: document.getElementById("sup-summary"), keyLevel: document.getElementById("key-level"), trend: document.getElementById("trend"),
+        supSummary: document.getElementById("sup-summary"), gapSummary: document.getElementById("gap-summary"), gapReadout: document.getElementById("gap-readout"), keyLevel: document.getElementById("key-level"), trend: document.getElementById("trend"),
         momentum: document.getElementById("momentum"), rsi: document.getElementById("rsi-readout"), bull: document.getElementById("bull-scenario"),
         bear: document.getElementById("bear-scenario"), note: document.getElementById("summary-note")
       };
@@ -462,6 +464,34 @@
         }
         return { supports: fill(supports, -1), resistances: fill(resistances, 1), atr: currentATR };
       }
+      function detectGaps(bars) {
+        var minimum = Math.max(atr(bars, 14) * 0.2, bars[bars.length - 1].close * 0.003, 1);
+        var gaps = [];
+        for (var i = 1; i < bars.length; i++) {
+          var previous = bars[i - 1], current = bars[i], direction = null, lower = null, upper = null;
+          if (current.low - previous.high >= minimum) {
+            direction = "up"; lower = previous.high; upper = current.low;
+          } else if (previous.low - current.high >= minimum) {
+            direction = "down"; lower = current.high; upper = previous.low;
+          }
+          if (!direction) continue;
+          var roundedLower = roundTick(lower), roundedUpper = roundTick(upper);
+          if (roundedUpper <= roundedLower) continue;
+          var gap = { direction: direction, lower: roundedLower, upper: roundedUpper, time: current.time, filled: false, filledAt: null };
+          for (var j = i + 1; j < bars.length; j++) {
+            if ((direction === "up" && bars[j].low <= gap.lower) || (direction === "down" && bars[j].high >= gap.upper)) {
+              gap.filled = true; gap.filledAt = bars[j].time; break;
+            }
+          }
+          gaps.push(gap);
+        }
+        var price = bars[bars.length - 1].close;
+        var open = gaps.filter(function (gap) { return !gap.filled; }).sort(function (a, b) {
+          function distance(gap) { return price < gap.lower ? gap.lower - price : price > gap.upper ? price - gap.upper : 0; }
+          return distance(a) - distance(b) || String(b.time).localeCompare(String(a.time));
+        });
+        return { all: gaps, open: open, nearest: open[0] || null, minimum: minimum };
+      }
 
       function disposeCharts() {
         state.observers.forEach(function (observer) { observer.disconnect(); });
@@ -491,10 +521,10 @@
         state.charts.push(chart); state.observers.push(observer);
         return chart;
       }
-      function priceLine(series, level, color, title, solid) {
-        series.createPriceLine({ price: level, color: color, lineWidth: solid ? 2 : 1, lineStyle: solid ? 0 : 2, axisLabelVisible: true, title: title });
+      function priceLine(series, level, color, title, solid, axisLabelVisible) {
+        series.createPriceLine({ price: level, color: color, lineWidth: solid ? 2 : 1, lineStyle: solid ? 0 : 2, axisLabelVisible: axisLabelVisible !== false, title: title || "" });
       }
-      function makeMainChart(bars, indicators, levels) {
+      function makeMainChart(bars, indicators, levels, gaps) {
         var chart = addChart("price-chart");
         var candles = chart.addSeries(LWC.CandlestickSeries, {
           upColor: "#27bd7b", downColor: "#e9545a", borderUpColor: "#27bd7b", borderDownColor: "#e9545a",
@@ -514,6 +544,11 @@
         });
         levels.resistances.forEach(function (level, index) { priceLine(candles, level.price, "#d84d53", "R" + (index + 1), index === 0); });
         levels.supports.forEach(function (level, index) { priceLine(candles, level.price, "#39aa71", "S" + (index + 1), index === 0); });
+        gaps.open.slice(0, 3).forEach(function (gap, index) {
+          var arrow = gap.direction === "up" ? "↑" : "↓", label = "GAP " + arrow + (index ? " " + (index + 1) : "");
+          priceLine(candles, gap.lower, "#d7b75f", label, false, true);
+          priceLine(candles, gap.upper, "#d7b75f", "", false, false);
+        });
         priceLine(candles, bars[bars.length - 1].close, "#22b978", "HARGA", true);
         chart.timeScale().fitContent();
         return chart;
@@ -577,7 +612,12 @@
           return '<div class="level-row ' + color + '"><span>' + label + '</span><i></i><b title="' + hint + '">' + fmt(level.price) + '</b></div>';
         }).join("");
       }
-      function updateSummary(bars, indicators, levels) {
+      function gapText(gap, includeState) {
+        if (!gap) return "Tidak ada gap terbuka";
+        var direction = gap.direction === "up" ? "↑" : "↓";
+        return "Gap " + direction + " " + fmt(gap.lower) + "–" + fmt(gap.upper) + (includeState ? " • belum tertutup" : "");
+      }
+      function updateSummary(bars, indicators, levels, gaps) {
         var latest = bars[bars.length - 1], previous = bars[bars.length - 2] || latest;
         var delta = latest.close - previous.close, percentage = previous.close ? (delta / previous.close) * 100 : 0;
         var ma20 = lastValue(indicators.ma20), ma50 = lastValue(indicators.ma50), ma100 = lastValue(indicators.ma100), ma200 = lastValue(indicators.ma200), rsiValue = lastValue(indicators.rsi);
@@ -601,9 +641,11 @@
         els.resList.innerHTML = levelsMarkup(levels.resistances, "res"); els.supList.innerHTML = levelsMarkup(levels.supports, "sup");
         els.resSummary.textContent = levels.resistances.map(function (level) { return fmt(level.price); }).join("  |  ");
         els.supSummary.textContent = levels.supports.map(function (level) { return fmt(level.price); }).join("  |  ");
+        els.gapSummary.textContent = gapText(gaps.nearest, true);
+        els.gapReadout.textContent = gaps.nearest ? (gaps.nearest.direction === "up" ? "↑ " : "↓ ") + fmt(gaps.nearest.lower) + "–" + fmt(gaps.nearest.upper) : "Tidak ada";
         els.bull.textContent = "Bertahan di atas " + fmt(s1.price) + " dan menembus " + fmt(r1.price) + " membuka ruang ke resistance berikutnya.";
         els.bear.textContent = "Turun di bawah " + fmt(s1.price) + " membuat support berikutnya di " + fmt(s2.price) + " perlu diperhatikan.";
-        els.note.textContent = trend + " • " + momentum + " • ATR " + fmt(levels.atr);
+        els.note.textContent = trend + " • " + momentum + " • " + (gaps.open.length ? gaps.open.length + " gap terbuka" : "gap terdekat sudah tertutup");
       }
       function renderWatchlist() {
         document.getElementById("watchlist").innerHTML = watch.map(function (symbol) {
@@ -619,13 +661,13 @@
         if (bars.length < 40) throw new Error("Data timeframe belum cukup.");
         disposeCharts();
         var indicators = { ma20: sma(bars, 20), ma50: sma(bars, 50), ma100: sma(bars, 100), ma200: sma(bars, 200), rsi: rsi(bars, 14), volumeMA: sma(bars, 20, "volume") };
-        var levels = calculateLevels(bars);
-        var price = makeMainChart(bars, indicators, levels);
+        var levels = calculateLevels(bars), gaps = detectGaps(bars);
+        var price = makeMainChart(bars, indicators, levels, gaps);
         var macdChart = makeMacdChart(bars, macd(bars));
         var rsiChart = makeRsiChart(bars, indicators.rsi);
         var volumeChart = makeVolumeChart(bars, indicators.volumeMA);
         syncCharts([price, macdChart, rsiChart, volumeChart]);
-        updateSummary(bars, indicators, levels);
+        updateSummary(bars, indicators, levels, gaps);
         renderWatchlist();
       }
       async function load(force) {

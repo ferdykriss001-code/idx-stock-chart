@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="id">
 <head>
+  <meta name="idx-build-version" content="2026-07-25-complete-56">
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#070a0d">
@@ -85,6 +86,13 @@
     .loading{display:none;position:absolute;inset:0;z-index:8;align-items:center;justify-content:center;background:rgba(7,10,13,.72);backdrop-filter:blur(2px)}.loading.show{display:flex}.loading span{display:inline-flex;align-items:center;gap:9px;border:1px solid #2c4140;border-radius:999px;background:#0f181c;color:#bde8d5;padding:9px 12px;font-size:11px;font-weight:800}.loading i{width:9px;height:9px;border:2px solid #3ed69a;border-right-color:transparent;border-radius:50%;animation:spin .7s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
     .empty{display:none;margin:15px;border:1px solid #56333a;border-radius:9px;background:rgba(110,35,45,.12);padding:13px;color:#f0b3b6;font-size:11px;line-height:1.5}.empty.show{display:block}
     .watchlist{display:flex;gap:5px;flex-wrap:wrap;margin-top:12px}.watchlist button{border:1px solid #2b3942;border-radius:999px;background:#10171c;color:#a9b6bc;padding:5px 8px;font-size:9px;font-weight:850}.watchlist button.selected{border-color:#3f9b76;background:#1b4b3d;color:#e5fff2}.watchlist button:hover{border-color:#5ec999;color:#e5fff2}
+    .indicator-controls{width:100%;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-top:10px;border-top:1px solid rgba(42,56,66,.72)}
+    .indicator-controls strong{color:#91a1a9;font-size:9px;letter-spacing:.1em;text-transform:uppercase;margin-right:3px}
+    .indicator-toggle{display:inline-flex;align-items:center;gap:5px;border:1px solid #2b3942;border-radius:999px;background:#0c1217;color:#aab8be;padding:5px 8px;font-size:9px;font-weight:800;cursor:pointer;user-select:none}
+    .indicator-toggle:hover{border-color:#4d7b69;color:#e8fff4}.indicator-toggle input{accent-color:#27bd7b;margin:0;width:12px;height:12px}
+    .indicator-toggle:has(input:checked){border-color:#387e64;background:rgba(30,107,78,.2);color:#dffff0}
+    .chart-area.hidden-indicator{display:none}.stack.hidden-indicator,.level-group.hidden-indicator,.strip-cell.hidden-indicator{display:none}
+    .fib-row{display:grid;grid-template-columns:42px 1fr auto;gap:7px;align-items:center;padding:6px 0;border-bottom:1px solid rgba(42,56,66,.6);font-size:10px;color:#d8b75d}.fib-row:last-child{border-bottom:0}.fib-row i{height:1px;background:currentColor;opacity:.5}.fib-row b{font-size:10px}
     footer{display:flex;justify-content:space-between;gap:16px;padding:14px 2px 0;color:#697781;font-size:10px;line-height:1.5}footer a{color:#8bdabd;text-decoration:none}
     @media(max-width:1180px){.chart-grid{grid-template-columns:220px minmax(0,1fr)}.levels-panel{grid-column:1/-1;border-left:0;border-top:1px solid var(--line);display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}.levels-header,.current-box{grid-column:1/-1;margin:0}.level-group{margin:0}.method{border-top:0;padding-top:0}}
     @media(max-width:820px){.workspace{padding:19px 12px 22px}.topbar{padding:0 14px}.heading{display:block}.disclaimer{margin-top:8px;text-align:left}.tools{display:none}.terminal{border-radius:9px}.toolbar{gap:10px}.reload{margin-left:0}.chart-grid{display:block}.analysis-panel{border-right:0;border-bottom:1px solid var(--line)}.analysis-panel{display:grid;grid-template-columns:1fr 1fr;gap:10px}.analysis-panel .stack{margin:0}.analysis-panel .stack:last-child{grid-column:1/-1}.levels-panel{display:block;border-top:1px solid var(--line)}.levels-header,.current-box,.level-group{margin-bottom:12px}.method{border-top:1px solid var(--line);padding-top:11px}.chart-main{height:390px}.chart-small{height:106px}.level-strip{grid-template-columns:1fr}.strip-cell{border-right:0;border-bottom:1px solid var(--line)}.strip-cell:last-child{border-bottom:0}footer{flex-direction:column;gap:4px}}
@@ -104,7 +112,7 @@
       <section class="heading">
         <div>
           <p class="eyebrow">Chart saham Indonesia</p>
-          <h1>Support, resistance &amp; gap otomatis</h1>
+          <h1>Support, resistance, gap &amp; Fibonacci otomatis</h1>
         </div>
         <p class="disclaimer">Level dihitung dari swing pivot dan clustering volatilitas pada candle aktif. Ini alat analisis teknikal, bukan rekomendasi beli atau jual.</p>
       </section>
@@ -125,11 +133,26 @@
           </div>
           <button class="reload" type="button" id="reload">↻ Perbarui data</button>
           <span class="status" id="status" aria-live="polite">Menunggu data…</span>
+          <div class="indicator-controls" id="indicator-controls" aria-label="Tampilkan atau sembunyikan indikator">
+            <strong>Indikator</strong>
+            <label class="indicator-toggle"><input type="checkbox" data-indicator="ma20" checked> MA20</label>
+            <label class="indicator-toggle"><input type="checkbox" data-indicator="ma50" checked> MA50</label>
+            <label class="indicator-toggle"><input type="checkbox" data-indicator="ma100" checked> MA100</label>
+            <label class="indicator-toggle"><input type="checkbox" data-indicator="ma200" checked> MA200</label>
+            <label class="indicator-toggle"><input type="checkbox" data-indicator="resistance" checked> Resistance</label>
+            <label class="indicator-toggle"><input type="checkbox" data-indicator="support" checked> Support</label>
+            <label class="indicator-toggle"><input type="checkbox" data-indicator="gap" checked> Gap</label>
+            <label class="indicator-toggle"><input type="checkbox" data-indicator="fibonacci" checked> Fibonacci</label>
+            <label class="indicator-toggle"><input type="checkbox" data-indicator="macd" checked> MACD</label>
+            <label class="indicator-toggle"><input type="checkbox" data-indicator="rsi" checked> RSI</label>
+            <label class="indicator-toggle"><input type="checkbox" data-indicator="volume" checked> Volume</label>
+            <label class="indicator-toggle"><input type="checkbox" data-indicator="volumeMA" checked> Volume MA20</label>
+          </div>
         </div>
 
         <div class="chart-grid">
           <aside class="analysis-panel">
-            <section class="stack">
+            <section class="stack" id="ma-stack">
               <h2>Moving average</h2>
               <div class="ma-row ma20"><span><i></i>MA 20</span><b id="ma20">—</b></div>
               <div class="ma-row ma50"><span><i></i>MA 50</span><b id="ma50">—</b></div>
@@ -161,27 +184,27 @@
               <div class="quote"><strong id="quote-price">—</strong><span id="quote-change">—</span></div>
             </div>
             <div class="chart-area">
-              <div class="panel-title">CANDLE • MA 20 / 50 / 100 / 200 • R/S &amp; GAP OTOMATIS</div>
+              <div class="panel-title">CANDLE • INDIKATOR DAPAT DI-CHECK / UNCHECK • FIBONACCI OTOMATIS</div>
               <div class="chart-host chart-main" id="price-chart" aria-label="Grafik candlestick dengan garis support, resistance, dan gap otomatis"></div>
               <div class="loading show" id="loading"><span><i></i>Memuat data candle…</span></div>
             </div>
-            <div class="chart-area">
+            <div class="chart-area" id="macd-area">
               <div class="panel-title">MACD 12 / 26 / 9</div>
               <div class="chart-host chart-small" id="macd-chart" aria-label="Indikator MACD"></div>
             </div>
-            <div class="chart-area">
+            <div class="chart-area" id="rsi-area">
               <div class="panel-title">RSI 14</div>
               <div class="chart-host chart-small" id="rsi-chart" aria-label="Indikator RSI"></div>
             </div>
-            <div class="chart-area">
+            <div class="chart-area" id="volume-area">
               <div class="panel-title">VOLUME + MA 20</div>
               <div class="chart-host chart-small" id="volume-chart" aria-label="Volume perdagangan"></div>
             </div>
             <div class="empty" id="empty"></div>
             <div class="level-strip">
-              <div class="strip-cell"><h3>Resistance</h3><p class="res" id="res-summary">—</p></div>
-              <div class="strip-cell"><h3>Support</h3><p class="sup" id="sup-summary">—</p></div>
-              <div class="strip-cell"><h3>Gap terbuka</h3><p class="gap" id="gap-summary">—</p></div>
+              <div class="strip-cell" id="res-strip"><h3>Resistance</h3><p class="res" id="res-summary">—</p></div>
+              <div class="strip-cell" id="sup-strip"><h3>Support</h3><p class="sup" id="sup-summary">—</p></div>
+              <div class="strip-cell" id="gap-strip"><h3>Gap terbuka</h3><p class="gap" id="gap-summary">—</p></div>
               <div class="strip-cell"><h3>Pembacaan</h3><p class="note" id="summary-note">Menunggu data harga…</p></div>
             </div>
           </section>
@@ -189,15 +212,19 @@
           <aside class="levels-panel">
             <div class="levels-header"><h2>LEVEL OTOMATIS</h2><span id="level-frame">1D</span></div>
             <div class="current-box"><span>Harga terakhir</span><b id="current-price">—</b></div>
-            <div class="level-group">
+            <div class="level-group" id="res-group">
               <div class="level-title res"><span>Resistance</span><span>Swing high</span></div>
               <div id="resistance-list"></div>
             </div>
-            <div class="level-group">
+            <div class="level-group" id="sup-group">
               <div class="level-title sup"><span>Support</span><span>Swing low</span></div>
               <div id="support-list"></div>
             </div>
-            <p class="method"><b>Cara hitung:</b> swing high/low dikelompokkan memakai rentang ATR. Gap ditandai bila rentang harga antar-candle lebih besar dari ambang volatilitas; statusnya tertutup setelah harga kembali menyentuh batas gap.</p>
+            <div class="level-group" id="fib-group">
+              <div class="level-title"><span style="color:#d8b75d">Fibonacci</span><span>Retracement</span></div>
+              <div id="fibonacci-list"></div>
+            </div>
+            <p class="method"><b>Cara hitung:</b> swing high/low dikelompokkan memakai rentang ATR. Gap ditandai bila rentang harga antar-candle lebih besar dari ambang volatilitas. Fibonacci dihitung otomatis dari swing high dan swing low utama pada maksimal 120 candle terakhir.</p>
             <div class="watchlist" id="watchlist" aria-label="Pilihan ticker"></div>
           </aside>
         </div>
@@ -215,7 +242,10 @@
       "use strict";
 
       var LWC = window.LightweightCharts;
-      var state = { symbol: "BKSL", timeframe: "1D", rawBars: [], meta: null, charts: [], observers: [], loading: false };
+      var defaultIndicators = { ma20:true, ma50:true, ma100:true, ma200:true, resistance:true, support:true, gap:true, fibonacci:true, macd:true, rsi:true, volume:true, volumeMA:true };
+      var savedIndicators = {};
+      try { savedIndicators = JSON.parse(localStorage.getItem("idxChartIndicators") || "{}"); } catch (ignore) {}
+      var state = { symbol: "BKSL", timeframe: "1D", rawBars: [], meta: null, charts: [], observers: [], loading: false, indicators: Object.assign({}, defaultIndicators, savedIndicators) };
       var companies = {
         BBCA: "Bank Central Asia Tbk.",
         DCII: "DCI Indonesia Tbk.",
@@ -284,7 +314,7 @@
         resList: document.getElementById("resistance-list"), supList: document.getElementById("support-list"), resSummary: document.getElementById("res-summary"),
         supSummary: document.getElementById("sup-summary"), gapSummary: document.getElementById("gap-summary"), gapReadout: document.getElementById("gap-readout"), keyLevel: document.getElementById("key-level"), trend: document.getElementById("trend"),
         momentum: document.getElementById("momentum"), rsi: document.getElementById("rsi-readout"), bull: document.getElementById("bull-scenario"),
-        bear: document.getElementById("bear-scenario"), note: document.getElementById("summary-note")
+        bear: document.getElementById("bear-scenario"), note: document.getElementById("summary-note"), fibList: document.getElementById("fibonacci-list")
       };
 
       function cleanSymbol(value) {
@@ -409,11 +439,7 @@
         try {
           daily = await fetchCachedDaily(symbol);
         } catch (cacheError) {
-          try {
-            daily = await fetchYahooDaily(symbol);
-          } catch (liveError) {
-            throw new Error("Data " + symbol + " belum tersedia. Data otomatis untuk ticker favorit akan muncul setelah workflow selesai.");
-          }
+          throw new Error("Data " + symbol + " belum tersedia di GitHub. Buka Actions lalu jalankan Refresh IDX daily + intraday data.");
         }
         try {
           var intraday = await fetchIntraday(symbol);
@@ -619,10 +645,30 @@
         state.charts.push(chart); state.observers.push(observer);
         return chart;
       }
+      function calculateFibonacci(bars) {
+        var sample = bars.slice(-Math.min(120, bars.length));
+        var highBar = sample[0], lowBar = sample[0];
+        sample.forEach(function (bar) { if (bar.high > highBar.high) highBar = bar; if (bar.low < lowBar.low) lowBar = bar; });
+        var high = highBar.high, low = lowBar.low, range = high - low;
+        if (!Number.isFinite(range) || range <= 0) return { levels: [], direction: "flat", high: high, low: low };
+        var upward = String(lowBar.time) < String(highBar.time);
+        var ratios = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
+        var levels = ratios.map(function (ratio) {
+          var value = upward ? high - range * ratio : low + range * ratio;
+          return { ratio: ratio, price: roundTick(value) };
+        });
+        return { levels: levels, direction: upward ? "up" : "down", high: high, low: low };
+      }
+      function fibonacciMarkup(fibonacci) {
+        return fibonacci.levels.map(function (level) {
+          var label = Math.round(level.ratio * 1000) / 10 + "%";
+          return '<div class="fib-row"><span>' + label + '</span><i></i><b>' + fmt(level.price) + '</b></div>';
+        }).join("");
+      }
       function priceLine(series, level, color, title, solid, axisLabelVisible) {
         series.createPriceLine({ price: level, color: color, lineWidth: solid ? 2 : 1, lineStyle: solid ? 0 : 2, axisLabelVisible: axisLabelVisible !== false, title: title || "" });
       }
-      function makeMainChart(bars, indicators, levels, gaps) {
+      function makeMainChart(bars, indicators, levels, gaps, fibonacci) {
         var chart = addChart("price-chart");
         var candles = chart.addSeries(LWC.CandlestickSeries, {
           upColor: "#27bd7b", downColor: "#e9545a", borderUpColor: "#27bd7b", borderDownColor: "#e9545a",
@@ -631,21 +677,26 @@
         });
         candles.setData(bars);
         var definitions = [
-          { data: indicators.ma20, color: "#ed565c", width: 2 },
-          { data: indicators.ma50, color: "#557fed", width: 2 },
-          { data: indicators.ma100, color: "#7ebd75", width: 1 },
-          { data: indicators.ma200, color: "#c2c9c7", width: 1 }
+          { key:"ma20", data: indicators.ma20, color: "#ed565c", width: 2 },
+          { key:"ma50", data: indicators.ma50, color: "#557fed", width: 2 },
+          { key:"ma100", data: indicators.ma100, color: "#7ebd75", width: 1 },
+          { key:"ma200", data: indicators.ma200, color: "#c2c9c7", width: 1 }
         ];
         definitions.forEach(function (definition) {
+          if (!state.indicators[definition.key]) return;
           var line = chart.addSeries(LWC.LineSeries, { color: definition.color, lineWidth: definition.width, crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false });
           line.setData(compactSeries(bars, definition.data));
         });
-        levels.resistances.forEach(function (level, index) { priceLine(candles, level.price, "#d84d53", "R" + (index + 1), index === 0); });
-        levels.supports.forEach(function (level, index) { priceLine(candles, level.price, "#39aa71", "S" + (index + 1), index === 0); });
-        gaps.open.slice(0, 3).forEach(function (gap, index) {
+        if (state.indicators.resistance) levels.resistances.forEach(function (level, index) { priceLine(candles, level.price, "#d84d53", "R" + (index + 1), index === 0); });
+        if (state.indicators.support) levels.supports.forEach(function (level, index) { priceLine(candles, level.price, "#39aa71", "S" + (index + 1), index === 0); });
+        if (state.indicators.gap) gaps.open.slice(0, 3).forEach(function (gap, index) {
           var arrow = gap.direction === "up" ? "↑" : "↓", label = "GAP " + arrow + (index ? " " + (index + 1) : "");
           priceLine(candles, gap.lower, "#d7b75f", label, false, true);
           priceLine(candles, gap.upper, "#d7b75f", "", false, false);
+        });
+        if (state.indicators.fibonacci) fibonacci.levels.forEach(function (level) {
+          var pct = Math.round(level.ratio * 1000) / 10;
+          priceLine(candles, level.price, "#c8963e", "FIB " + pct + "%", false, level.ratio === 0.5 || level.ratio === 0.618);
         });
         priceLine(candles, bars[bars.length - 1].close, "#22b978", "HARGA", true);
         chart.timeScale().fitContent();
@@ -678,8 +729,10 @@
         var hist = chart.addSeries(LWC.HistogramSeries, { priceFormat: { type: "volume" }, priceScaleId: "", lastValueVisible: false, priceLineVisible: false });
         hist.priceScale().applyOptions({ scaleMargins: { top: 0.14, bottom: 0 } });
         hist.setData(bars.map(function (bar) { return { time: bar.time, value: bar.volume, color: bar.close >= bar.open ? "rgba(43,190,125,.58)" : "rgba(235,82,89,.58)" }; }));
-        var line = chart.addSeries(LWC.LineSeries, { color: "#507ee7", lineWidth: 1, crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false, priceScaleId: "" });
-        line.setData(compactSeries(bars, volumeMA));
+        if (state.indicators.volumeMA) {
+          var line = chart.addSeries(LWC.LineSeries, { color: "#507ee7", lineWidth: 1, crosshairMarkerVisible: false, lastValueVisible: false, priceLineVisible: false, priceScaleId: "" });
+          line.setData(compactSeries(bars, volumeMA));
+        }
         chart.timeScale().fitContent();
         return chart;
       }
@@ -754,19 +807,41 @@
           button.onclick = function () { state.symbol = button.dataset.symbol; els.input.value = state.symbol; load(true); };
         });
       }
+      function applyIndicatorVisibility() {
+        ["ma20","ma50","ma100","ma200"].forEach(function (key) {
+          var row = document.querySelector(".ma-row." + key); if (row) row.style.display = state.indicators[key] ? "flex" : "none";
+        });
+        var map = { "macd-area":"macd", "rsi-area":"rsi", "volume-area":"volume", "res-group":"resistance", "sup-group":"support", "fib-group":"fibonacci", "res-strip":"resistance", "sup-strip":"support", "gap-strip":"gap" };
+        Object.keys(map).forEach(function (id) { var node=document.getElementById(id); if(node) node.classList.toggle("hidden-indicator", !state.indicators[map[id]]); });
+      }
+      function setupIndicatorControls() {
+        document.querySelectorAll("[data-indicator]").forEach(function (input) {
+          var key=input.dataset.indicator; input.checked=state.indicators[key] !== false;
+          input.onchange=function () {
+            state.indicators[key]=input.checked;
+            try { localStorage.setItem("idxChartIndicators", JSON.stringify(state.indicators)); } catch(ignore) {}
+            applyIndicatorVisibility();
+            if (state.rawBars.length) { try { render(); setStatus("Indikator diperbarui", "ok"); } catch(error) { displayError(error.message); } }
+          };
+        });
+        applyIndicatorVisibility();
+      }
       function render() {
         if (!LWC) throw new Error("Chart engine tidak dapat dimuat. Coba refresh halaman.");
         var bars = aggregateBars(state.rawBars, state.timeframe);
         if (bars.length < 5) throw new Error("Data timeframe belum cukup. Minimal 5 candle diperlukan.");
         disposeCharts();
         var indicators = { ma20: sma(bars, 20), ma50: sma(bars, 50), ma100: sma(bars, 100), ma200: sma(bars, 200), rsi: rsi(bars, 14), volumeMA: sma(bars, 20, "volume") };
-        var levels = calculateLevels(bars), gaps = detectGaps(bars);
-        var price = makeMainChart(bars, indicators, levels, gaps);
-        var macdChart = makeMacdChart(bars, macd(bars));
-        var rsiChart = makeRsiChart(bars, indicators.rsi);
-        var volumeChart = makeVolumeChart(bars, indicators.volumeMA);
-        syncCharts([price, macdChart, rsiChart, volumeChart]);
+        var levels = calculateLevels(bars), gaps = detectGaps(bars), fibonacci = calculateFibonacci(bars);
+        applyIndicatorVisibility();
+        var activeCharts = [];
+        var price = makeMainChart(bars, indicators, levels, gaps, fibonacci); activeCharts.push(price);
+        if (state.indicators.macd) activeCharts.push(makeMacdChart(bars, macd(bars)));
+        if (state.indicators.rsi) activeCharts.push(makeRsiChart(bars, indicators.rsi));
+        if (state.indicators.volume) activeCharts.push(makeVolumeChart(bars, indicators.volumeMA));
+        syncCharts(activeCharts);
         updateSummary(bars, indicators, levels, gaps);
+        els.fibList.innerHTML = state.indicators.fibonacci ? fibonacciMarkup(fibonacci) : "";
         renderWatchlist();
       }
       async function load(force) {
@@ -805,6 +880,7 @@
           }
         };
       });
+      setupIndicatorControls();
       load(true);
       setInterval(function () { if (!document.hidden) load(true); }, 300000);
     }());

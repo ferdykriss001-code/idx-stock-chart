@@ -781,7 +781,7 @@
           render();
           var lastCandle = result.bars[result.bars.length - 1];
           if (result.intradayUpdatedAt) {
-            setStatus("Harga 5 menit diperbarui " + epochLabel(result.intradayUpdatedAt) + " • candle " + dateLabel(lastCandle && lastCandle.time), "ok");
+            setStatus("Harga 5 menit diperbarui " + timeLabel(result.intradayUpdatedAt) + " • candle " + dateLabel(lastCandle && lastCandle.time), "ok");
           } else {
             setStatus("Candle terakhir " + dateLabel(lastCandle && lastCandle.time) + " • intraday menunggu workflow", "ok");
           }

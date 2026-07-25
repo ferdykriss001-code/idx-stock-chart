@@ -3,128 +3,108 @@ name: Refresh IDX intraday prices
 on:
   workflow_dispatch:
   schedule:
-    # Setiap 10 menit, Senin–Jumat. Target keterlambatan umumnya di bawah 15 menit.
+    # Setiap 10 menit, Senin–Jumat. GitHub/Yahoo dapat menambah keterlambatan.
     - cron: "*/10 1-10 * * 1-5"
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/refresh-intraday-data.yml"
 
 permissions:
   contents: write
 
 concurrency:
-  group: refresh-idx-intraday-data
+  group: refresh-idx-market-data
   cancel-in-progress: false
 
 jobs:
   refresh:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Download 5-minute candles
         env:
           TICKERS: BBCA DCII BREN BBRI BYAN BMRI MORA TLKM AMMN ASII DSSA TPIA SMMA DNET SRAJ BRPT BBNI PANI CASA MPRO UNTR EMAS BNLI ICBP HMSP BRIS IMPC CDIA UNVR BRMS ADRO ANTM AADI CUAN MDKA INDF GOTO AMRT ISAT CPIN ADMR MBMA SUPR NCKL BUMI MEGA MTEL INCO EXCL MYOR BKSL KETR PTBA NETV PTRO ITMG
         run: |
           python3 - <<'PY'
-          import json
-          import math
-          import os
-          import time
-          import urllib.request
+          import json, math, os, random, time, urllib.request
+          from concurrent.futures import ThreadPoolExecutor, as_completed
           from datetime import datetime, timezone
           from pathlib import Path
           from zoneinfo import ZoneInfo
 
+          tickers = os.environ["TICKERS"].split()
           out = Path("data/intraday")
           out.mkdir(parents=True, exist_ok=True)
           jakarta = ZoneInfo("Asia/Jakarta")
-          headers = {
-              "User-Agent": "Mozilla/5.0 (compatible; IDX-Chart-Lab/1.1)",
-              "Accept": "application/json,text/plain,*/*",
-          }
+          headers = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/124 Safari/537.36", "Accept": "application/json,text/plain,*/*"}
+
+          def finite(v): return isinstance(v, (int, float)) and math.isfinite(v)
 
           def download(symbol):
-              last_error = None
-              for host in ("query1.finance.yahoo.com", "query2.finance.yahoo.com"):
-                  url = f"https://{host}/v8/finance/chart/{symbol}.JK?range=5d&interval=5m&events=history&includePrePost=false"
-                  try:
-                      request = urllib.request.Request(url, headers=headers)
-                      with urllib.request.urlopen(request, timeout=30) as response:
-                          payload = json.load(response)
-                      chart = payload.get("chart", {})
-                      if chart.get("error"):
-                          raise RuntimeError(chart["error"])
-                      results = chart.get("result") or []
-                      if not results:
-                          raise ValueError("Yahoo returned no result")
-                      result = results[0]
-                      quote = result["indicators"]["quote"][0]
-                      bars = []
-                      for index, stamp in enumerate(result.get("timestamp") or []):
-                          values = []
-                          for key in ("open", "high", "low", "close"):
-                              series = quote.get(key) or []
-                              values.append(series[index] if index < len(series) else None)
-                          if not all(isinstance(value, (int, float)) and math.isfinite(value) for value in values):
-                              continue
-                          volumes = quote.get("volume") or []
-                          volume = volumes[index] if index < len(volumes) else 0
-                          local_dt = datetime.fromtimestamp(stamp, timezone.utc).astimezone(jakarta)
-                          bars.append({
-                              "time": stamp,
-                              "day": local_dt.strftime("%Y-%m-%d"),
-                              "dateTime": local_dt.isoformat(),
-                              "open": values[0], "high": values[1], "low": values[2], "close": values[3],
-                              "volume": volume if isinstance(volume, (int, float)) and math.isfinite(volume) else 0,
-                          })
-                      if not bars:
-                          raise ValueError("No valid intraday candles")
-                      meta = result.get("meta", {})
-                      return {
-                          "symbol": symbol,
-                          "source": "Yahoo Finance 5m",
-                          "interval": "5m",
-                          "updatedAt": int(time.time()),
-                          "latestCandleTime": bars[-1]["time"],
-                          "latestPrice": bars[-1]["close"],
-                          "meta": {
-                              "longName": meta.get("longName") or meta.get("shortName") or f"{symbol} • IDX",
-                              "exchangeName": meta.get("fullExchangeName") or "IDX",
-                              "regularMarketTime": meta.get("regularMarketTime"),
-                              "regularMarketPrice": meta.get("regularMarketPrice"),
-                          },
-                          "bars": bars,
-                      }
-                  except Exception as error:
-                      last_error = error
-                      print(f"{symbol}: {host} failed: {error}")
-                      time.sleep(1)
-              raise RuntimeError(last_error)
+              errors = []
+              for attempt in range(3):
+                  hosts = ["query1.finance.yahoo.com", "query2.finance.yahoo.com"]
+                  random.shuffle(hosts)
+                  for host in hosts:
+                      url = f"https://{host}/v8/finance/chart/{symbol}.JK?range=5d&interval=5m&events=history&includePrePost=false"
+                      try:
+                          req = urllib.request.Request(url, headers=headers)
+                          with urllib.request.urlopen(req, timeout=35) as response:
+                              payload = json.load(response)
+                          chart = payload.get("chart") or {}
+                          if chart.get("error"): raise RuntimeError(chart["error"])
+                          result = (chart.get("result") or [None])[0]
+                          if not result: raise ValueError("Yahoo returned no result")
+                          quote = result["indicators"]["quote"][0]
+                          bars = []
+                          for i, stamp in enumerate(result.get("timestamp") or []):
+                              vals = []
+                              for key in ("open", "high", "low", "close"):
+                                  series = quote.get(key) or []
+                                  vals.append(series[i] if i < len(series) else None)
+                              if not all(finite(v) for v in vals): continue
+                              volumes = quote.get("volume") or []
+                              volume = volumes[i] if i < len(volumes) else 0
+                              local_dt = datetime.fromtimestamp(stamp, timezone.utc).astimezone(jakarta)
+                              bars.append({"time": stamp, "day": local_dt.strftime("%Y-%m-%d"), "dateTime": local_dt.isoformat(), "open": vals[0], "high": vals[1], "low": vals[2], "close": vals[3], "volume": volume if finite(volume) else 0})
+                          if not bars: raise ValueError("no valid intraday candles")
+                          meta = result.get("meta") or {}
+                          return {"symbol": symbol, "source": "Yahoo Finance 5m", "interval": "5m", "updatedAt": int(time.time()), "latestCandleTime": bars[-1]["time"], "latestPrice": bars[-1]["close"], "meta": {"longName": meta.get("longName") or meta.get("shortName") or f"{symbol} • IDX", "exchangeName": meta.get("fullExchangeName") or "IDX", "regularMarketTime": meta.get("regularMarketTime"), "regularMarketPrice": meta.get("regularMarketPrice")}, "bars": bars}
+                      except Exception as exc:
+                          errors.append(f"{host}: {exc}")
+                  time.sleep(2 ** attempt)
+              raise RuntimeError(" | ".join(errors[-4:]))
 
-          saved = 0
-          for ticker in os.environ["TICKERS"].split():
+          def process(symbol):
               try:
-                  record = download(ticker)
-                  (out / f"{ticker}.json").write_text(json.dumps(record, separators=(",", ":")), encoding="utf-8")
-                  saved += 1
-                  print(f"Saved {ticker}: {len(record['bars'])} candles; latest={record['latestPrice']}")
-              except Exception as error:
-                  print(f"Skipping {ticker}: {error}")
-          if not saved:
-              raise SystemExit("No intraday market data refreshed.")
+                  record = download(symbol)
+                  (out / f"{symbol}.json").write_text(json.dumps(record, separators=(",", ":")), encoding="utf-8")
+                  return {"symbol": symbol, "ok": True, "latestPrice": record["latestPrice"]}
+              except Exception as exc:
+                  return {"symbol": symbol, "ok": False, "error": str(exc)}
+
+          results = []
+          with ThreadPoolExecutor(max_workers=6) as pool:
+              futures = {pool.submit(process, ticker): ticker for ticker in tickers}
+              for future in as_completed(futures):
+                  row = future.result(); results.append(row); print(json.dumps(row, ensure_ascii=False))
+          if not any(r["ok"] for r in results): raise SystemExit("No intraday data could be refreshed")
           PY
 
-      - name: Commit intraday data when changed
+      - name: Commit intraday data
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data/intraday
           if git diff --cached --quiet; then
             echo "No intraday changes to commit."
-          else
-            git commit -m "chore: refresh IDX intraday prices"
-            git pull --rebase origin main
-            git push
+            exit 0
           fi
+          git commit -m "chore: refresh IDX intraday prices"
+          for attempt in 1 2 3; do
+            git pull --rebase origin main && git push && exit 0
+            git rebase --abort || true
+            sleep $((attempt * 5))
+          done
+          exit 1

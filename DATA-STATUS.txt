@@ -1,0 +1,6 @@
+Folder data now contains one JSON file for every configured ticker.
+
+Important:
+- Existing valid candle files are preserved.
+- Missing tickers use status=pending and bars=[] until the daily workflow runs successfully.
+- Run Actions > Refresh IDX daily candles first, then Refresh IDX 5-minute candles.

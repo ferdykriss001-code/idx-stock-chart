@@ -1,110 +1,56 @@
-name: Refresh IDX intraday prices
+name: Refresh IDX 5-minute candles
 
 on:
   workflow_dispatch:
   schedule:
-    # Setiap 10 menit, Senin–Jumat. GitHub/Yahoo dapat menambah keterlambatan.
-    - cron: "*/10 1-10 * * 1-5"
+    # Setiap 15 menit pada hari kerja. GitHub dapat terlambat beberapa menit.
+    - cron: "*/15 1-10 * * 1-5"
+  push:
+    branches: [main]
+    paths:
+      - "scripts/update_market.py"
+      - ".github/workflows/refresh-intraday-data.yml"
 
 permissions:
   contents: write
 
 concurrency:
-  group: refresh-idx-market-data
-  cancel-in-progress: false
+  group: refresh-idx-intraday
+  cancel-in-progress: true
 
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Download 5-minute candles
-        env:
-          TICKERS: BBCA DCII BREN BBRI BYAN BMRI MORA TLKM AMMN ASII DSSA TPIA SMMA DNET SRAJ BRPT BBNI PANI CASA MPRO UNTR EMAS BNLI ICBP HMSP BRIS IMPC CDIA UNVR BRMS ADRO ANTM AADI CUAN MDKA INDF GOTO AMRT ISAT CPIN ADMR MBMA SUPR NCKL BUMI MEGA MTEL INCO EXCL MYOR BKSL KETR PTBA NETV PTRO ITMG
-        run: |
-          python3 - <<'PY'
-          import json, math, os, random, time, urllib.request
-          from concurrent.futures import ThreadPoolExecutor, as_completed
-          from datetime import datetime, timezone
-          from pathlib import Path
-          from zoneinfo import ZoneInfo
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
 
-          tickers = os.environ["TICKERS"].split()
-          out = Path("data/intraday")
-          out.mkdir(parents=True, exist_ok=True)
-          jakarta = ZoneInfo("Asia/Jakarta")
-          headers = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/124 Safari/537.36", "Accept": "application/json,text/plain,*/*"}
+      - name: Install market-data dependencies
+        run: python -m pip install --upgrade "yfinance>=0.2.54" "pandas>=2.2"
 
-          def finite(v): return isinstance(v, (int, float)) and math.isfinite(v)
+      - name: Download 5-minute candles for 50 market-cap stocks and additions
+        run: python scripts/update_market.py --mode intraday
 
-          def download(symbol):
-              errors = []
-              for attempt in range(3):
-                  hosts = ["query1.finance.yahoo.com", "query2.finance.yahoo.com"]
-                  random.shuffle(hosts)
-                  for host in hosts:
-                      url = f"https://{host}/v8/finance/chart/{symbol}.JK?range=5d&interval=5m&events=history&includePrePost=false"
-                      try:
-                          req = urllib.request.Request(url, headers=headers)
-                          with urllib.request.urlopen(req, timeout=35) as response:
-                              payload = json.load(response)
-                          chart = payload.get("chart") or {}
-                          if chart.get("error"): raise RuntimeError(chart["error"])
-                          result = (chart.get("result") or [None])[0]
-                          if not result: raise ValueError("Yahoo returned no result")
-                          quote = result["indicators"]["quote"][0]
-                          bars = []
-                          for i, stamp in enumerate(result.get("timestamp") or []):
-                              vals = []
-                              for key in ("open", "high", "low", "close"):
-                                  series = quote.get(key) or []
-                                  vals.append(series[i] if i < len(series) else None)
-                              if not all(finite(v) for v in vals): continue
-                              volumes = quote.get("volume") or []
-                              volume = volumes[i] if i < len(volumes) else 0
-                              local_dt = datetime.fromtimestamp(stamp, timezone.utc).astimezone(jakarta)
-                              bars.append({"time": stamp, "day": local_dt.strftime("%Y-%m-%d"), "dateTime": local_dt.isoformat(), "open": vals[0], "high": vals[1], "low": vals[2], "close": vals[3], "volume": volume if finite(volume) else 0})
-                          if not bars: raise ValueError("no valid intraday candles")
-                          meta = result.get("meta") or {}
-                          return {"symbol": symbol, "source": "Yahoo Finance 5m", "interval": "5m", "updatedAt": int(time.time()), "latestCandleTime": bars[-1]["time"], "latestPrice": bars[-1]["close"], "meta": {"longName": meta.get("longName") or meta.get("shortName") or f"{symbol} • IDX", "exchangeName": meta.get("fullExchangeName") or "IDX", "regularMarketTime": meta.get("regularMarketTime"), "regularMarketPrice": meta.get("regularMarketPrice")}, "bars": bars}
-                      except Exception as exc:
-                          errors.append(f"{host}: {exc}")
-                  time.sleep(2 ** attempt)
-              raise RuntimeError(" | ".join(errors[-4:]))
-
-          def process(symbol):
-              try:
-                  record = download(symbol)
-                  (out / f"{symbol}.json").write_text(json.dumps(record, separators=(",", ":")), encoding="utf-8")
-                  return {"symbol": symbol, "ok": True, "latestPrice": record["latestPrice"]}
-              except Exception as exc:
-                  return {"symbol": symbol, "ok": False, "error": str(exc)}
-
-          results = []
-          with ThreadPoolExecutor(max_workers=6) as pool:
-              futures = {pool.submit(process, ticker): ticker for ticker in tickers}
-              for future in as_completed(futures):
-                  row = future.result(); results.append(row); print(json.dumps(row, ensure_ascii=False))
-          if not any(r["ok"] for r in results): raise SystemExit("No intraday data could be refreshed")
-          PY
-
-      - name: Commit intraday data
+      - name: Commit refreshed intraday data
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/intraday
+          git add data/intraday data/refresh-status-intraday.json
           if git diff --cached --quiet; then
             echo "No intraday changes to commit."
             exit 0
           fi
-          git commit -m "chore: refresh IDX intraday prices"
+          git commit -m "chore: refresh IDX 5-minute candles"
           for attempt in 1 2 3; do
             git pull --rebase origin main && git push && exit 0
             git rebase --abort || true
-            sleep $((attempt * 5))
+            sleep $((attempt * 6))
           done
           exit 1

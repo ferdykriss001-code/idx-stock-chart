@@ -1,56 +1,44 @@
-name: Refresh IDX 5-minute candles
+name: V2 Refresh IDX 5-minute data
 
 on:
   workflow_dispatch:
   schedule:
-    # Setiap 15 menit pada hari kerja. GitHub dapat terlambat beberapa menit.
-    - cron: "*/15 1-10 * * 1-5"
-  push:
-    branches: [main]
-    paths:
-      - "scripts/update_market.py"
-      - ".github/workflows/refresh-intraday-data.yml"
+    # Every 5 minutes, Monday-Friday. GitHub may still queue scheduled runs.
+    - cron: "*/5 1-10 * * 1-5"
 
 permissions:
   contents: write
 
 concurrency:
-  group: refresh-idx-intraday
+  group: v2-refresh-idx-intraday
   cancel-in-progress: true
 
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: pip
-
-      - name: Install market-data dependencies
-        run: python -m pip install --upgrade "yfinance>=0.2.54" "pandas>=2.2"
-
-      - name: Download 5-minute candles for 50 market-cap stocks and additions
-        run: python scripts/update_market.py --mode intraday
-
-      - name: Commit refreshed intraday data
+      - name: Refresh 5-minute candles in parallel
+        run: python scripts/update_market.py --mode intraday --workers 10
+      - name: Commit only valid refreshed data
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data/intraday data/refresh-status-intraday.json
           if git diff --cached --quiet; then
-            echo "No intraday changes to commit."
-            exit 0
+            echo "No intraday changes."
+          else
+            git commit -m "chore(v2): refresh IDX 5-minute candles"
+            for attempt in 1 2 3; do
+              git pull --rebase origin main && git push && exit 0
+              git rebase --abort || true
+              sleep $((attempt * 5))
+            done
+            exit 1
           fi
-          git commit -m "chore: refresh IDX 5-minute candles"
-          for attempt in 1 2 3; do
-            git pull --rebase origin main && git push && exit 0
-            git rebase --abort || true
-            sleep $((attempt * 6))
-          done
-          exit 1

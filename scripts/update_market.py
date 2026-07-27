@@ -1,37 +1,41 @@
 #!/usr/bin/env python3
-"""Refresh IDX candles from Yahoo Finance with batching, retries, and safe file writes."""
+"""IDX Chart Lab V2 market updater.
+
+Uses Yahoo's chart endpoint concurrently, preserves older valid files on errors,
+and writes a refresh status report for diagnostics.
+"""
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import json
 import math
-import os
 import random
 import time
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
-import pandas as pd
-import yfinance as yf
+ROOT = Path(__file__).resolve().parents[1]
+CONFIG = ROOT / "config" / "tickers.json"
+JAKARTA = ZoneInfo("Asia/Jakarta")
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (compatible; IDX-Chart-Lab-V2/2.0)",
+    "Accept": "application/json,text/plain,*/*",
+}
 
-TOP50 = [
-    "BBCA","DCII","BREN","BBRI","BYAN","BMRI","MORA","TLKM","AMMN","ASII",
-    "DSSA","TPIA","SMMA","DNET","SRAJ","BRPT","BBNI","PANI","CASA","MPRO",
-    "UNTR","EMAS","BNLI","ICBP","HMSP","BRIS","IMPC","CDIA","UNVR","BRMS",
-    "ADRO","ANTM","AADI","CUAN","MDKA","INDF","GOTO","AMRT","ISAT","CPIN",
-    "ADMR","MBMA","SUPR","NCKL","BUMI","MEGA","MTEL","INCO","EXCL","MYOR",
-]
-LEGACY = ["BKSL","KETR","PTBA","NETV","PTRO","ITMG"]
-ADDITIONAL = ["JGLE"]
-TICKERS = TOP50 + LEGACY + ADDITIONAL
+
+def load_tickers() -> list[str]:
+    payload = json.loads(CONFIG.read_text(encoding="utf-8"))
+    combined = payload.get("top50", []) + payload.get("legacy", []) + payload.get("additional", [])
+    return list(dict.fromkeys(str(item).upper().strip() for item in combined if str(item).strip()))
 
 
 def finite(value: Any) -> bool:
-    try:
-        return math.isfinite(float(value))
-    except (TypeError, ValueError):
-        return False
+    return isinstance(value, (int, float)) and math.isfinite(value)
 
 
 def atomic_json(path: Path, payload: dict[str, Any]) -> None:
@@ -41,156 +45,133 @@ def atomic_json(path: Path, payload: dict[str, Any]) -> None:
     temp.replace(path)
 
 
-def split_frame(frame: pd.DataFrame, yahoo_symbol: str) -> pd.DataFrame:
-    if frame is None or frame.empty:
-        return pd.DataFrame()
-    if isinstance(frame.columns, pd.MultiIndex):
-        level0 = list(frame.columns.get_level_values(0))
-        level1 = list(frame.columns.get_level_values(1))
-        if yahoo_symbol in level0:
-            return frame[yahoo_symbol].copy()
-        if yahoo_symbol in level1:
-            return frame.xs(yahoo_symbol, axis=1, level=1).copy()
-    return frame.copy()
+def endpoint(symbol: str, mode: str, host: str) -> str:
+    if mode == "daily":
+        query = "range=2y&interval=1d&events=history&includeAdjustedClose=true"
+    else:
+        query = "range=5d&interval=5m&events=history&includePrePost=false"
+    return f"https://{host}/v8/finance/chart/{symbol}.JK?{query}"
 
 
-def bars_from_frame(symbol: str, frame: pd.DataFrame, mode: str) -> list[dict[str, Any]]:
+def parse(symbol: str, mode: str, result: dict[str, Any]) -> dict[str, Any]:
+    quote = ((result.get("indicators") or {}).get("quote") or [{}])[0]
+    timestamps = result.get("timestamp") or []
     bars: list[dict[str, Any]] = []
-    if frame.empty:
-        return bars
-    required = ["Open", "High", "Low", "Close"]
-    if not all(column in frame.columns for column in required):
-        return bars
-    for index, row in frame.iterrows():
-        values = [row.get(column) for column in required]
+    for idx, stamp in enumerate(timestamps):
+        values = []
+        for key in ("open", "high", "low", "close"):
+            series = quote.get(key) or []
+            values.append(series[idx] if idx < len(series) else None)
         if not all(finite(value) for value in values):
             continue
-        dt = pd.Timestamp(index)
-        if dt.tzinfo is None:
-            dt = dt.tz_localize("UTC")
-        else:
-            dt = dt.tz_convert("UTC")
-        stamp = int(dt.timestamp())
-        volume = row.get("Volume", 0)
+        volumes = quote.get("volume") or []
+        volume = volumes[idx] if idx < len(volumes) else 0
         common = {
-            "open": float(values[0]), "high": float(values[1]),
-            "low": float(values[2]), "close": float(values[3]),
-            "volume": int(float(volume)) if finite(volume) else 0,
+            "open": values[0], "high": values[1], "low": values[2], "close": values[3],
+            "volume": volume if finite(volume) else 0,
         }
         if mode == "daily":
-            common.update({"time": dt.strftime("%Y-%m-%d"), "timestamp": stamp})
+            common.update({"time": datetime.fromtimestamp(stamp, timezone.utc).strftime("%Y-%m-%d"), "timestamp": stamp})
         else:
-            jakarta = dt.tz_convert("Asia/Jakarta")
-            common.update({"time": stamp, "day": jakarta.strftime("%Y-%m-%d"), "dateTime": jakarta.isoformat()})
+            local_dt = datetime.fromtimestamp(stamp, timezone.utc).astimezone(JAKARTA)
+            common.update({"time": stamp, "day": local_dt.strftime("%Y-%m-%d"), "dateTime": local_dt.isoformat()})
         bars.append(common)
-    # Yahoo occasionally returns duplicate rows.
-    key = "time"
-    unique = {bar[key]: bar for bar in bars}
-    return [unique[k] for k in sorted(unique)]
-
-
-def metadata(symbol: str) -> dict[str, Any]:
-    return {"longName": f"{symbol} • IDX", "exchangeName": "IDX"}
-
-
-def record(symbol: str, bars: list[dict[str, Any]], mode: str) -> dict[str, Any]:
+    bars = list({bar["time"]: bar for bar in bars}.values())
+    bars.sort(key=lambda bar: bar["time"])
+    if not bars:
+        raise ValueError("Yahoo returned no valid candles")
+    meta = result.get("meta") or {}
     now = int(time.time())
+    base = {
+        "symbol": symbol,
+        "updatedAt": now,
+        "source": "Yahoo Finance" if mode == "daily" else "Yahoo Finance 5m",
+        "meta": {
+            "longName": meta.get("longName") or meta.get("shortName") or f"{symbol} • IDX",
+            "exchangeName": meta.get("fullExchangeName") or "IDX",
+            "regularMarketTime": meta.get("regularMarketTime"),
+            "regularMarketPrice": meta.get("regularMarketPrice"),
+        },
+        "bars": bars,
+    }
     if mode == "daily":
-        return {
-            "symbol": symbol, "updatedAt": now, "latestCandle": bars[-1]["time"],
-            "source": "Yahoo Finance", "meta": metadata(symbol), "bars": bars,
-        }
-    return {
-        "symbol": symbol, "updatedAt": now, "latestCandleTime": bars[-1]["time"],
-        "latestPrice": bars[-1]["close"], "source": "Yahoo Finance 5m", "interval": "5m",
-        "meta": metadata(symbol), "bars": bars,
-    }
+        base["latestCandle"] = bars[-1]["time"]
+    else:
+        base.update({"interval": "5m", "latestCandleTime": bars[-1]["time"], "latestPrice": bars[-1]["close"]})
+    return base
 
 
-def download_batch(symbols: list[str], mode: str) -> pd.DataFrame:
-    yahoo_symbols = [f"{symbol}.JK" for symbol in symbols]
-    kwargs = dict(
-        tickers=" ".join(yahoo_symbols),
-        period="2y" if mode == "daily" else "5d",
-        interval="1d" if mode == "daily" else "5m",
-        group_by="ticker", auto_adjust=False, actions=False,
-        progress=False, threads=True, timeout=40,
-    )
-    return yf.download(**kwargs)
+def download(symbol: str, mode: str) -> tuple[str, dict[str, Any] | None, str | None]:
+    last_error: Exception | None = None
+    for attempt in range(3):
+        for host in ("query1.finance.yahoo.com", "query2.finance.yahoo.com"):
+            try:
+                request = urllib.request.Request(endpoint(symbol, mode, host), headers=HEADERS)
+                with urllib.request.urlopen(request, timeout=25) as response:
+                    payload = json.load(response)
+                chart = payload.get("chart") or {}
+                if chart.get("error"):
+                    raise RuntimeError(str(chart["error"]))
+                results = chart.get("result") or []
+                if not results:
+                    raise ValueError("Yahoo returned no result")
+                return symbol, parse(symbol, mode, results[0]), None
+            except Exception as exc:  # preserve diagnostics per ticker
+                last_error = exc
+        time.sleep(1.2 + attempt * 1.8 + random.random())
+    return symbol, None, str(last_error or "unknown error")
 
 
-def download_single(symbol: str, mode: str) -> pd.DataFrame:
-    ticker = yf.Ticker(f"{symbol}.JK")
-    return ticker.history(
-        period="2y" if mode == "daily" else "5d",
-        interval="1d" if mode == "daily" else "5m",
-        auto_adjust=False, actions=False, timeout=40,
-    )
-
-
-def refresh(mode: str) -> None:
-    output = Path("data" if mode == "daily" else "data/intraday")
+def refresh(mode: str, workers: int) -> None:
+    tickers = load_tickers()
+    output = ROOT / ("data" if mode == "daily" else "data/intraday")
     output.mkdir(parents=True, exist_ok=True)
-    status_rows: dict[str, dict[str, Any]] = {
-        symbol: {"symbol": symbol, "success": False, "error": "not processed"} for symbol in TICKERS
-    }
-    batch_size = 8
-    for offset in range(0, len(TICKERS), batch_size):
-        symbols = TICKERS[offset:offset + batch_size]
-        try:
-            frame = download_batch(symbols, mode)
-        except Exception as exc:
-            frame = pd.DataFrame()
-            print(f"Batch {symbols} failed: {exc}")
-        for symbol in symbols:
-            yahoo_symbol = f"{symbol}.JK"
-            bars = bars_from_frame(symbol, split_frame(frame, yahoo_symbol), mode)
-            minimum = 5 if mode == "daily" else 1
-            error = None
-            if len(bars) < minimum:
-                for attempt in range(3):
-                    try:
-                        single = download_single(symbol, mode)
-                        bars = bars_from_frame(symbol, single, mode)
-                        if len(bars) >= minimum:
-                            break
-                    except Exception as exc:
-                        error = str(exc)
-                    time.sleep(2 + attempt * 3 + random.random())
-            if len(bars) >= minimum:
-                atomic_json(output / f"{symbol}.json", record(symbol, bars, mode))
-                status_rows[symbol] = {
-                    "symbol": symbol, "success": True, "candles": len(bars),
-                    "latest": bars[-1]["time"],
-                }
-                print(f"Saved {symbol}: {len(bars)} {mode} candles")
-            else:
-                # Keep an older valid file if one exists; never replace it with empty data.
-                status_rows[symbol] = {
-                    "symbol": symbol, "success": False,
-                    "error": error or "Yahoo returned no valid candles; old cache preserved",
-                }
-                print(f"Skipped {symbol}: {status_rows[symbol]['error']}")
-            time.sleep(0.8 + random.random() * 0.5)
-        time.sleep(4 + random.random() * 2)
+    started = int(time.time())
+    results: list[dict[str, Any]] = []
 
-    rows = [status_rows[symbol] for symbol in TICKERS]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(download, symbol, mode): symbol for symbol in tickers}
+        for future in concurrent.futures.as_completed(futures):
+            symbol, record, error = future.result()
+            path = output / f"{symbol}.json"
+            if record is not None:
+                atomic_json(path, record)
+                results.append({"symbol": symbol, "success": True, "candles": len(record["bars"]), "latest": record["bars"][-1]["time"]})
+                print(f"Saved {symbol}: {len(record['bars'])} {mode} candles")
+            else:
+                old_valid = False
+                try:
+                    existing = json.loads(path.read_text(encoding="utf-8"))
+                    old_valid = bool(existing.get("bars"))
+                except Exception:
+                    pass
+                results.append({"symbol": symbol, "success": False, "oldCachePreserved": old_valid, "error": error})
+                print(f"Skipped {symbol}: {error}; old_valid={old_valid}")
+
+    results.sort(key=lambda row: row["symbol"])
+    success_count = sum(1 for row in results if row["success"])
     payload = {
-        "updatedAt": int(time.time()), "mode": mode,
-        "top50Count": len(TOP50), "additionalCount": len(LEGACY) + len(ADDITIONAL),
-        "tickerCount": len(TICKERS), "successCount": sum(1 for row in rows if row["success"]),
-        "failedCount": sum(1 for row in rows if not row["success"]), "results": rows,
+        "version": 2,
+        "mode": mode,
+        "startedAt": started,
+        "updatedAt": int(time.time()),
+        "durationSeconds": int(time.time()) - started,
+        "tickerCount": len(tickers),
+        "successCount": success_count,
+        "failedCount": len(tickers) - success_count,
+        "results": results,
     }
-    atomic_json(Path("data") / f"refresh-status-{mode}.json", payload)
-    if payload["successCount"] == 0:
-        raise SystemExit(f"No {mode} data could be refreshed")
+    atomic_json(ROOT / "data" / f"refresh-status-{mode}.json", payload)
+    if success_count == 0:
+        raise SystemExit(f"No {mode} ticker could be refreshed")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=["daily", "intraday"], required=True)
+    parser.add_argument("--mode", choices=("daily", "intraday"), required=True)
+    parser.add_argument("--workers", type=int, default=8)
     args = parser.parse_args()
-    refresh(args.mode)
+    refresh(args.mode, max(1, min(args.workers, 12)))
 
 
 if __name__ == "__main__":

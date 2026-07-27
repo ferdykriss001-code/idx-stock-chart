@@ -105,7 +105,7 @@
       <a class="brand" href="#chart" aria-label="IDX Chart Lab"><span class="brand-mark">◒</span><span>IDX Chart Lab</span></a>
       <div class="tools"><i></i><span>TradingView Lightweight Charts</span></div>
       <div class="spacer"></div>
-      <span class="data-badge">Harga intraday • refresh 10 menit</span>
+      <span class="data-badge">Harga intraday • target refresh 5 menit</span>
     </header>
 
     <main class="workspace" id="chart">
@@ -857,7 +857,12 @@
           render();
           var lastCandle = result.bars[result.bars.length - 1];
           if (result.intradayUpdatedAt) {
-            setStatus("Harga 5 menit diperbarui " + timeLabel(result.intradayUpdatedAt) + " • candle " + dateLabel(lastCandle && lastCandle.time), "ok");
+            var ageMinutes = Math.max(0, Math.floor((Date.now()/1000 - Number(result.intradayUpdatedAt))/60));
+            if (ageMinutes > 20) {
+              setStatus("Intraday terlambat " + ageMinutes + " menit • terakhir " + timeLabel(result.intradayUpdatedAt) + " • candle " + dateLabel(lastCandle && lastCandle.time), "error");
+            } else {
+              setStatus("Intraday diperbarui " + timeLabel(result.intradayUpdatedAt) + " • usia " + ageMinutes + " menit • candle " + dateLabel(lastCandle && lastCandle.time), "ok");
+            }
           } else {
             setStatus("Candle terakhir " + dateLabel(lastCandle && lastCandle.time) + " • intraday menunggu workflow", "ok");
           }

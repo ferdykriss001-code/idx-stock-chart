@@ -11,5 +11,5 @@ UPLOAD SEKALI — IDX STOCK CHART
 5. Setelah hijau, jalankan "Refresh IDX 5-minute candles".
 6. Tunggu deployment GitHub Pages, lalu Ctrl+Shift+R.
 
-Daftar: 50 saham market cap dari CSV + BKSL, KETR, PTBA, NETV, PTRO, ITMG + JGLE.
+Daftar: 119 ticker unik — 50 saham market cap, Kompas100 periode 3 Agustus 2026–29 Januari 2027, serta BKSL, KETR, PTBA, NETV, PTRO, ITMG, dan JGLE.
 Jika Yahoo tidak menyediakan sebuah ticker pada saat refresh, file lama yang valid dipertahankan dan alasan gagal dicatat di data/refresh-status-*.json.

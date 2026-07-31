@@ -30,7 +30,8 @@ HEADERS = {
 
 def load_tickers() -> list[str]:
     payload = json.loads(CONFIG.read_text(encoding="utf-8"))
-    combined = payload.get("top50", []) + payload.get("legacy", []) + payload.get("additional", [])
+    groups = ("top50", "kompas100", "legacy", "additional")
+    combined = [symbol for group in groups for symbol in payload.get(group, [])]
     return list(dict.fromkeys(str(item).upper().strip() for item in combined if str(item).strip()))
 
 

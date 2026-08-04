@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "updatedAt": 0,
+  "source": {
+    "name": "IDX Listed Company Directory",
+    "url": "https://www.idx.co.id/en/companies/listed-companies/",
+    "retrievedAt": 0
+  },
+  "tickerCount": 0,
+  "tickers": [],
+  "companies": [],
+  "tiers": {
+    "firstLiner": [],
+    "secondLiner": [],
+    "thirdLiner": []
+  },
+  "tierDefinitions": {
+    "firstLiner": "Top50 pada config/tickers.json; proksi saham berkapitalisasi besar.",
+    "secondLiner": "Konstituen Kompas100 selain Top50; proksi saham likuid lapis kedua.",
+    "thirdLiner": "Saham biasa IDX aktif lain yang tidak berada pada dua kelompok di atas.",
+    "note": "Kategori ini adalah pengelompokan operasional aplikasi, bukan klasifikasi resmi IDX."
+  }
+}

@@ -2,21 +2,44 @@ name: V2 Refresh IDX 5-minute data
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/refresh-intraday-data.yml"
+      - "config/tickers.json"
+      - "scripts/update_market.py"
+      - "scripts/sync_idx_universe.py"
+      - "scripts/merge_intraday_artifacts.py"
   schedule:
-    # Every 5 minutes, Monday-Friday. GitHub may still queue scheduled runs.
-    - cron: "*/5 1-10 * * 1-5"
+    # UTC. These windows are the IDX regular equity sessions in WIB, offset
+    # from the top of each 5-minute interval to reduce scheduler contention.
+    # Monday-Thursday: 09:02-11:57 WIB
+    - cron: "2,7,12,17,22,27,32,37,42,47,52,57 2-4 * * 1-4"
+    # Monday-Thursday: 13:32-15:47 WIB, then collect the closing price.
+    - cron: "32,37,42,47,52,57 6 * * 1-4"
+    - cron: "2,7,12,17,22,27,32,37,42,47,52,57 7 * * 1-4"
+    - cron: "2,7,12,17,22,27,32,37,42,47 8 * * 1-4"
+    - cron: "2 9 * * 1-4"
+    # Friday: 09:02-11:32 WIB and 14:02-15:47 WIB, plus closing price.
+    - cron: "2,7,12,17,22,27,32,37,42,47,52,57 2-3 * * 5"
+    - cron: "2,7,12,17,22,27,32 4 * * 5"
+    - cron: "2,7,12,17,22,27,32,37,42,47,52,57 7 * * 5"
+    - cron: "2,7,12,17,22,27,32,37,42,47 8 * * 5"
+    - cron: "2 9 * * 5"
 
 permissions:
   contents: write
 
 concurrency:
   group: v2-refresh-idx-intraday
-  cancel-in-progress: true
+  # Never cancel a partly refreshed universe: the next run waits for a complete
+  # atomic publish instead of leaving the cache in a mixed state.
+  cancel-in-progress: false
 
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 9
     steps:
       - uses: actions/checkout@v4
         with:
@@ -24,21 +47,44 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Refresh 5-minute candles in parallel
-        run: python scripts/update_market.py --mode intraday --workers 10
-      - name: Commit only valid refreshed data
+      - name: Sync active IDX equity universe when stale
+        run: python scripts/sync_idx_universe.py --if-stale-hours 18
+      - name: Refresh all 5-minute shards concurrently
+        run: |
+          for shard in 0 1 2 3; do
+            python scripts/update_market.py \
+              --mode intraday \
+              --workers 6 \
+              --shard-index "$shard" \
+              --shard-count 4 \
+              --status-file "data/refresh-status-intraday-shard-$shard.json" \
+              --allow-empty &
+          done
+          wait
+      - name: Merge shard status into one health report
+        run: |
+          python scripts/merge_intraday_artifacts.py \
+            --statuses-dir data \
+            --shard-count 4 \
+            --data-already-present
+          rm -f \
+            data/refresh-status-intraday-shard-0.json \
+            data/refresh-status-intraday-shard-1.json \
+            data/refresh-status-intraday-shard-2.json \
+            data/refresh-status-intraday-shard-3.json
+      - name: Commit one complete refresh
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/intraday data/refresh-status-intraday.json
+          git add config/idx-universe.json data/intraday data/refresh-status-intraday.json
           if git diff --cached --quiet; then
             echo "No intraday changes."
-          else
-            git commit -m "chore(v2): refresh IDX 5-minute candles"
-            for attempt in 1 2 3; do
-              git pull --rebase origin main && git push && exit 0
-              git rebase --abort || true
-              sleep $((attempt * 5))
-            done
-            exit 1
+            exit 0
           fi
+          git commit -m "chore(v2): refresh IDX 5-minute candles"
+          for attempt in 1 2 3; do
+            git pull --rebase origin main && git push && exit 0
+            git rebase --abort || true
+            sleep $((attempt * 5))
+          done
+          exit 1

@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="id">
 <head>
-  <meta name="idx-build-version" content="2026-07-25-complete-56">
+  <meta name="idx-build-version" content="2026-08-04-tiered-universe">
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#070a0d">
@@ -122,7 +122,7 @@
           <form class="ticker-form" id="ticker-form">
             <label for="ticker">Ticker IDX</label>
             <div class="symbol-input">
-              <input id="ticker" value="BKSL" maxlength="10" autocomplete="off" spellcheck="false" aria-label="Kode saham IDX">
+              <input id="ticker" value="BKSL" maxlength="10" autocomplete="off" spellcheck="false" list="ticker-list" aria-label="Kode saham IDX"><datalist id="ticker-list"></datalist>
               <button type="submit">Tampilkan</button>
             </div>
           </form>
@@ -245,7 +245,7 @@
       var defaultIndicators = { ma20:true, ma50:true, ma100:true, ma200:true, resistance:true, support:true, gap:true, fibonacci:true, macd:true, rsi:true, volume:true, volumeMA:true };
       var savedIndicators = {};
       try { savedIndicators = JSON.parse(localStorage.getItem("idxChartIndicators") || "{}"); } catch (ignore) {}
-      var state = { symbol: "BKSL", timeframe: "1D", rawBars: [], meta: null, charts: [], observers: [], loading: false, indicators: Object.assign({}, defaultIndicators, savedIndicators) };
+      var state = { symbol: "BKSL", timeframe: "1D", rawBars: [], meta: null, charts: [], observers: [], loading: false, universeLoaded: false, indicators: Object.assign({}, defaultIndicators, savedIndicators) };
       var companies = {
         BBCA: "Bank Central Asia Tbk.",
         DCII: "DCI Indonesia Tbk.",
@@ -308,7 +308,7 @@
       var watch = ["BBCA", "DCII", "BREN", "BBRI", "BYAN", "BMRI", "MORA", "TLKM", "AMMN", "ASII", "DSSA", "TPIA", "SMMA", "DNET", "SRAJ", "BRPT", "BBNI", "PANI", "CASA", "MPRO", "UNTR", "EMAS", "BNLI", "ICBP", "HMSP", "BRIS", "IMPC", "CDIA", "UNVR", "BRMS", "ADRO", "ANTM", "AADI", "CUAN", "MDKA", "INDF", "GOTO", "AMRT", "ISAT", "CPIN", "ADMR", "MBMA", "SUPR", "NCKL", "BUMI", "MEGA", "MTEL", "INCO", "EXCL", "MYOR", "BKSL", "KETR", "PTBA", "NETV", "PTRO", "ITMG", "JGLE"];
       var palette = { green: "#25bc79", red: "#ec4e54", grid: "#1a252d", text: "#83929a", bg: "#0a1015" };
       var els = {
-        input: document.getElementById("ticker"), status: document.getElementById("status"), loading: document.getElementById("loading"),
+        input: document.getElementById("ticker"), tickerList: document.getElementById("ticker-list"), status: document.getElementById("status"), loading: document.getElementById("loading"),
         empty: document.getElementById("empty"), price: document.getElementById("quote-price"), change: document.getElementById("quote-change"),
         symbol: document.getElementById("symbol-title"), company: document.getElementById("company"), ohlc: document.getElementById("ohlc"),
         panelPrice: document.getElementById("panel-price"), current: document.getElementById("current-price"), frame: document.getElementById("level-frame"),
@@ -858,8 +858,8 @@
           var lastCandle = result.bars[result.bars.length - 1];
           if (result.intradayUpdatedAt) {
             var ageMinutes = Math.max(0, Math.floor((Date.now()/1000 - Number(result.intradayUpdatedAt))/60));
-            if (ageMinutes > 20) {
-              setStatus("Intraday terlambat " + ageMinutes + " menit • terakhir " + timeLabel(result.intradayUpdatedAt) + " • candle " + dateLabel(lastCandle && lastCandle.time), "error");
+            if (ageMinutes > 10) {
+              setStatus("Intraday melewati target 10 menit: " + ageMinutes + " menit • terakhir " + timeLabel(result.intradayUpdatedAt) + " • candle " + dateLabel(lastCandle && lastCandle.time), "error");
             } else {
               setStatus("Intraday diperbarui " + timeLabel(result.intradayUpdatedAt) + " • usia " + ageMinutes + " menit • candle " + dateLabel(lastCandle && lastCandle.time), "ok");
             }
@@ -886,7 +886,37 @@
           }
         };
       });
+      async function loadTickerUniverse() {
+        try {
+          var response = await fetch("config/idx-universe.json?ts=" + Date.now(), { cache: "no-store" });
+          if (!response.ok) return;
+          var universe = await response.json();
+          var rows = Array.isArray(universe.companies) ? universe.companies : [];
+          if (!rows.length) return;
+          els.tickerList.innerHTML = "";
+          rows.forEach(function (row) {
+            var symbol = cleanSymbol(row && row.symbol);
+            if (!symbol) return;
+            var name = String((row && row.name) || companies[symbol] || (symbol + " • IDX"));
+            companies[symbol] = name;
+            var option = document.createElement("option");
+            option.value = symbol;
+            option.label = name;
+            els.tickerList.appendChild(option);
+          });
+          var firstLiner = universe.tiers && Array.isArray(universe.tiers.firstLiner) ? universe.tiers.firstLiner : [];
+          if (firstLiner.length) {
+            watch = firstLiner.slice(0, 24).map(cleanSymbol).filter(Boolean);
+            renderWatchlist();
+          }
+          state.universeLoaded = true;
+        } catch (ignore) {
+          // The existing curated watchlist remains available until the first sync.
+        }
+      }
+
       setupIndicatorControls();
+      loadTickerUniverse();
       load(true);
       setInterval(function () { if (!document.hidden) load(true); }, 300000);
     }());

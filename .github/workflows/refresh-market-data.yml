@@ -11,12 +11,12 @@ permissions:
 
 concurrency:
   group: v2-refresh-idx-daily
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
         with:
@@ -24,13 +24,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Synchronize IDX universe before daily refresh
+        run: python scripts/sync_idx_universe.py --if-stale-hours 18
       - name: Refresh daily candles in parallel
-        run: python scripts/update_market.py --mode daily --workers 8
+        run: python scripts/update_market.py --mode daily --workers 12
       - name: Commit only valid refreshed data
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/*.json
+          git add config/idx-universe.json data/*.json
           if git diff --cached --quiet; then
             echo "No daily changes."
           else

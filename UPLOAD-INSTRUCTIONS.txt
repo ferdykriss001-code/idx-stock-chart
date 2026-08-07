@@ -1,15 +1,11 @@
-UPLOAD SEKALI — IDX STOCK CHART
+IDX CHART LAB V3 - CARA UPLOAD
 
-1. Upload SELURUH ISI folder ini ke root repository GitHub (branch main).
-2. Jangan upload ZIP-nya; ekstrak lebih dahulu.
-3. Pastikan file berikut terlihat:
-   .github/workflows/refresh-market-data.yml
-   .github/workflows/refresh-intraday-data.yml
-   scripts/update_market.py
-   index.html
-4. Buka Actions lalu jalankan "Refresh IDX daily candles".
-5. Setelah hijau, jalankan "Refresh IDX 5-minute candles".
-6. Tunggu deployment GitHub Pages, lalu Ctrl+Shift+R.
+1. Ekstrak ZIP.
+2. Upload SEMUA ISI folder ke root repository idx-stock-chart branch main.
+3. Pastikan ada: .github/workflows, config, scripts, data/market.json, index.html.
+4. Commit directly to main.
+5. Actions -> V3 Refresh IDX daily data -> Run workflow. Tunggu hijau.
+6. Actions -> V3 Refresh IDX 5-minute data -> Run workflow. Tunggu hijau.
+7. Tunggu GitHub Pages deploy lalu Ctrl+Shift+R.
 
-Daftar: 119 ticker unik — 50 saham market cap, Kompas100 periode 3 Agustus 2026–29 Januari 2027, serta BKSL, KETR, PTBA, NETV, PTRO, ITMG, dan JGLE.
-Jika Yahoo tidak menyediakan sebuah ticker pada saat refresh, file lama yang valid dipertahankan dan alasan gagal dicatat di data/refresh-status-*.json.
+File JSON lama di data/ boleh dibiarkan, V3 tidak membacanya. Setelah V3 stabil, boleh dihapus untuk merapikan repo.

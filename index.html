@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="id">
 <head>
-  <meta name="idx-build-version" content="2026-08-04-tiered-universe">
+  <meta name="idx-build-version" content="2026-07-25-complete-56">
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#070a0d">
@@ -105,7 +105,7 @@
       <a class="brand" href="#chart" aria-label="IDX Chart Lab"><span class="brand-mark">◒</span><span>IDX Chart Lab</span></a>
       <div class="tools"><i></i><span>TradingView Lightweight Charts</span></div>
       <div class="spacer"></div>
-      <span class="data-badge">Harga intraday • target refresh 5 menit</span>
+      <span class="data-badge">Harga intraday V3 • target refresh 5 menit</span>
     </header>
 
     <main class="workspace" id="chart">
@@ -122,7 +122,7 @@
           <form class="ticker-form" id="ticker-form">
             <label for="ticker">Ticker IDX</label>
             <div class="symbol-input">
-              <input id="ticker" value="BKSL" maxlength="10" autocomplete="off" spellcheck="false" list="ticker-list" aria-label="Kode saham IDX"><datalist id="ticker-list"></datalist>
+              <input id="ticker" value="BKSL" maxlength="10" autocomplete="off" spellcheck="false" aria-label="Kode saham IDX">
               <button type="submit">Tampilkan</button>
             </div>
           </form>
@@ -231,7 +231,7 @@
       </section>
 
       <footer>
-        <span>Data harga: Yahoo Finance 5 menit + cache candle harian • Chart engine: <a href="https://www.tradingview.com/" target="_blank" rel="noopener">TradingView Lightweight Charts™</a></span>
+        <span>Data harga V3: Yahoo Finance 5 menit + satu market.json • Chart engine: <a href="https://www.tradingview.com/" target="_blank" rel="noopener">TradingView Lightweight Charts™</a></span>
         <span>Level otomatis = alat bantu, bukan jaminan harga berbalik.</span>
       </footer>
     </main>
@@ -245,7 +245,7 @@
       var defaultIndicators = { ma20:true, ma50:true, ma100:true, ma200:true, resistance:true, support:true, gap:true, fibonacci:true, macd:true, rsi:true, volume:true, volumeMA:true };
       var savedIndicators = {};
       try { savedIndicators = JSON.parse(localStorage.getItem("idxChartIndicators") || "{}"); } catch (ignore) {}
-      var state = { symbol: "BKSL", timeframe: "1D", rawBars: [], meta: null, charts: [], observers: [], loading: false, universeLoaded: false, indicators: Object.assign({}, defaultIndicators, savedIndicators) };
+      var state = { symbol: "BKSL", timeframe: "1D", rawBars: [], meta: null, charts: [], observers: [], loading: false, indicators: Object.assign({}, defaultIndicators, savedIndicators) };
       var companies = {
         BBCA: "Bank Central Asia Tbk.",
         DCII: "DCI Indonesia Tbk.",
@@ -308,7 +308,7 @@
       var watch = ["BBCA", "DCII", "BREN", "BBRI", "BYAN", "BMRI", "MORA", "TLKM", "AMMN", "ASII", "DSSA", "TPIA", "SMMA", "DNET", "SRAJ", "BRPT", "BBNI", "PANI", "CASA", "MPRO", "UNTR", "EMAS", "BNLI", "ICBP", "HMSP", "BRIS", "IMPC", "CDIA", "UNVR", "BRMS", "ADRO", "ANTM", "AADI", "CUAN", "MDKA", "INDF", "GOTO", "AMRT", "ISAT", "CPIN", "ADMR", "MBMA", "SUPR", "NCKL", "BUMI", "MEGA", "MTEL", "INCO", "EXCL", "MYOR", "BKSL", "KETR", "PTBA", "NETV", "PTRO", "ITMG", "JGLE"];
       var palette = { green: "#25bc79", red: "#ec4e54", grid: "#1a252d", text: "#83929a", bg: "#0a1015" };
       var els = {
-        input: document.getElementById("ticker"), tickerList: document.getElementById("ticker-list"), status: document.getElementById("status"), loading: document.getElementById("loading"),
+        input: document.getElementById("ticker"), status: document.getElementById("status"), loading: document.getElementById("loading"),
         empty: document.getElementById("empty"), price: document.getElementById("quote-price"), change: document.getElementById("quote-change"),
         symbol: document.getElementById("symbol-title"), company: document.getElementById("company"), ohlc: document.getElementById("ohlc"),
         panelPrice: document.getElementById("panel-price"), current: document.getElementById("current-price"), frame: document.getElementById("level-frame"),
@@ -369,50 +369,42 @@
         return bars;
       }
 
-      async function fetchCachedDaily(symbol) {
-        var response = await fetch("data/" + encodeURIComponent(symbol) + ".json?ts=" + Date.now(), { cache: "no-store" });
-        if (!response.ok) throw new Error("Data harian belum tersedia untuk " + symbol + ".");
-        var payload = await response.json();
-        return { bars: normalizeBars(payload.bars), meta: payload.meta || {}, updatedAt: payload.updatedAt || null, source: payload.source || "cache harian" };
-      }
-
-      async function fetchYahooDaily(symbol) {
-        var controller = new AbortController();
-        var timer = setTimeout(function () { controller.abort(); }, 14000);
-        try {
-          var url = "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(symbol) + ".JK?range=2y&interval=1d&events=history&includeAdjustedClose=true&ts=" + Date.now();
-          var response = await fetch(url, { cache: "no-store", signal: controller.signal });
-          if (!response.ok) throw new Error("Sumber data mengembalikan status " + response.status + ".");
-          var json = await response.json();
-          var result = json && json.chart && json.chart.result && json.chart.result[0];
-          if (!result) throw new Error((json && json.chart && json.chart.error && json.chart.error.description) || "Data ticker tidak ditemukan.");
-          var quote = result.indicators && result.indicators.quote && result.indicators.quote[0];
-          var bars = (result.timestamp || []).map(function (stamp, index) {
-            var open = quote && quote.open ? quote.open[index] : null;
-            var high = quote && quote.high ? quote.high[index] : null;
-            var low = quote && quote.low ? quote.low[index] : null;
-            var close = quote && quote.close ? quote.close[index] : null;
-            var volume = quote && quote.volume ? quote.volume[index] : null;
-            if (![open, high, low, close].every(Number.isFinite)) return null;
-            return { time: new Date(stamp * 1000).toISOString().slice(0, 10), timestamp: stamp, open: open, high: high, low: low, close: close, volume: Number.isFinite(volume) ? volume : 0 };
-          }).filter(Boolean);
-          return { bars: normalizeBars(bars), meta: result.meta || {}, updatedAt: result.meta && result.meta.regularMarketTime, source: "Yahoo Finance" };
-        } finally {
-          clearTimeout(timer);
+      async function fetchMarketStock(symbol) {
+        var response = await fetch("data/market.json?ts=" + Date.now(), { cache: "no-store" });
+        if (!response.ok) throw new Error("market.json belum tersedia (HTTP " + response.status + ").");
+        var market = await response.json();
+        if (!market || Number(market.version) < 3 || !market.stocks) throw new Error("Format market.json bukan V3.");
+        var stock = market.stocks[symbol];
+        if (!stock) throw new Error("Ticker " + symbol + " belum tercantum pada market.json.");
+        var daily = stock.daily || null;
+        if (!daily || !(daily.bars || []).length) {
+          var refresh = market.refresh && market.refresh.daily;
+          var lastError = refresh && refresh.results && refresh.results.find(function (r) { return r.symbol === symbol && !r.success; });
+          throw new Error("Candle harian " + symbol + " belum tersedia" + (lastError && lastError.error ? ": " + lastError.error : ". Jalankan workflow V3 daily.") );
         }
-      }
-
-      async function fetchIntraday(symbol) {
-        var response = await fetch("data/intraday/" + encodeURIComponent(symbol) + ".json?ts=" + Date.now(), { cache: "no-store" });
-        if (!response.ok) throw new Error("Data intraday belum tersedia");
-        var payload = await response.json();
-        var bars = (payload.bars || []).map(function (bar) {
-          var open = Number(bar.open), high = Number(bar.high), low = Number(bar.low), close = Number(bar.close), volume = Number(bar.volume);
-          if (![open, high, low, close].every(Number.isFinite) || !bar.day) return null;
-          return { day: String(bar.day).slice(0, 10), time: Number(bar.time), open: open, high: high, low: low, close: close, volume: Number.isFinite(volume) ? volume : 0 };
-        }).filter(Boolean);
-        if (!bars.length) throw new Error("Candle intraday kosong");
-        return { bars: bars, updatedAt: payload.updatedAt || null, latestPrice: Number(payload.latestPrice), meta: payload.meta || {} };
+        var bars = normalizeBars(daily.bars);
+        var intraday = stock.intraday || null;
+        var intradayUpdatedAt = null;
+        if (intraday && (intraday.bars || []).length) {
+          var intradayBars = (intraday.bars || []).map(function (bar) {
+            var open=Number(bar.open), high=Number(bar.high), low=Number(bar.low), close=Number(bar.close), volume=Number(bar.volume);
+            if (![open,high,low,close].every(Number.isFinite) || !bar.day) return null;
+            return { day:String(bar.day).slice(0,10), time:Number(bar.time), open:open, high:high, low:low, close:close, volume:Number.isFinite(volume)?volume:0 };
+          }).filter(Boolean);
+          if (intradayBars.length) {
+            bars = mergeIntradayIntoDaily(bars, intradayBars);
+            intradayUpdatedAt = intraday.updatedAt || null;
+          }
+        }
+        return {
+          bars: bars,
+          meta: stock.meta || {},
+          updatedAt: daily.updatedAt || null,
+          intradayUpdatedAt: intradayUpdatedAt,
+          latestPrice: intraday ? Number(intraday.latestPrice) : null,
+          source: intradayUpdatedAt ? "Yahoo Finance 5m + daily • V3" : "Yahoo Finance daily • V3",
+          refresh: market.refresh || {}
+        };
       }
 
       function mergeIntradayIntoDaily(dailyBars, intradayBars) {
@@ -431,28 +423,12 @@
         };
         var merged = dailyBars.filter(function (bar) { return bar.time !== latestDay; });
         merged.push(daily);
-        merged.sort(function (a, b) { return a.time.localeCompare(b.time); });
+        merged.sort(function (a,b) { return a.time.localeCompare(b.time); });
         return merged;
       }
 
       async function fetchDaily(symbol) {
-        var daily;
-        try {
-          daily = await fetchCachedDaily(symbol);
-        } catch (cacheError) {
-          throw new Error("Data " + symbol + " belum tersedia di GitHub. Buka Actions lalu jalankan Refresh IDX daily + intraday data.");
-        }
-        try {
-          var intraday = await fetchIntraday(symbol);
-          daily.bars = mergeIntradayIntoDaily(daily.bars, intraday.bars);
-          daily.intradayUpdatedAt = intraday.updatedAt;
-          daily.latestPrice = intraday.latestPrice;
-          daily.source = "Yahoo Finance 5m + daily";
-          daily.meta = Object.assign({}, daily.meta || {}, intraday.meta || {});
-        } catch (intradayError) {
-          daily.intradayUpdatedAt = null;
-        }
-        return daily;
+        return fetchMarketStock(symbol);
       }
 
       function weekKey(time) {
@@ -858,13 +834,13 @@
           var lastCandle = result.bars[result.bars.length - 1];
           if (result.intradayUpdatedAt) {
             var ageMinutes = Math.max(0, Math.floor((Date.now()/1000 - Number(result.intradayUpdatedAt))/60));
-            if (ageMinutes > 10) {
-              setStatus("Intraday melewati target 10 menit: " + ageMinutes + " menit • terakhir " + timeLabel(result.intradayUpdatedAt) + " • candle " + dateLabel(lastCandle && lastCandle.time), "error");
+            if (ageMinutes > 15) {
+              setStatus("Intraday melewati target 15 menit: " + ageMinutes + " menit • terakhir " + timeLabel(result.intradayUpdatedAt) + " • candle " + dateLabel(lastCandle && lastCandle.time), "error");
             } else {
-              setStatus("Intraday diperbarui " + timeLabel(result.intradayUpdatedAt) + " • usia " + ageMinutes + " menit • candle " + dateLabel(lastCandle && lastCandle.time), "ok");
+              setStatus("Intraday V3 • usia " + ageMinutes + " menit • diperbarui " + timeLabel(result.intradayUpdatedAt) + " • candle " + dateLabel(lastCandle && lastCandle.time), "ok");
             }
           } else {
-            setStatus("Candle terakhir " + dateLabel(lastCandle && lastCandle.time) + " • intraday menunggu workflow", "ok");
+            setStatus("Candle terakhir " + dateLabel(lastCandle && lastCandle.time) + " • intraday V3 belum tersedia", "ok");
           }
         } catch (error) {
           disposeCharts();
@@ -886,37 +862,7 @@
           }
         };
       });
-      async function loadTickerUniverse() {
-        try {
-          var response = await fetch("config/idx-universe.json?ts=" + Date.now(), { cache: "no-store" });
-          if (!response.ok) return;
-          var universe = await response.json();
-          var rows = Array.isArray(universe.companies) ? universe.companies : [];
-          if (!rows.length) return;
-          els.tickerList.innerHTML = "";
-          rows.forEach(function (row) {
-            var symbol = cleanSymbol(row && row.symbol);
-            if (!symbol) return;
-            var name = String((row && row.name) || companies[symbol] || (symbol + " • IDX"));
-            companies[symbol] = name;
-            var option = document.createElement("option");
-            option.value = symbol;
-            option.label = name;
-            els.tickerList.appendChild(option);
-          });
-          var firstLiner = universe.tiers && Array.isArray(universe.tiers.firstLiner) ? universe.tiers.firstLiner : [];
-          if (firstLiner.length) {
-            watch = firstLiner.slice(0, 24).map(cleanSymbol).filter(Boolean);
-            renderWatchlist();
-          }
-          state.universeLoaded = true;
-        } catch (ignore) {
-          // The existing curated watchlist remains available until the first sync.
-        }
-      }
-
       setupIndicatorControls();
-      loadTickerUniverse();
       load(true);
       setInterval(function () { if (!document.hidden) load(true); }, 300000);
     }());

@@ -1,0 +1,44 @@
+name: V3 Full IDX - Refresh 5-minute quotes
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Weekdays, every 5 minutes. GitHub may queue scheduled jobs.
+    - cron: "*/5 1-10 * * 1-5"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: full-idx-quotes-writer
+  cancel-in-progress: true
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Refresh all IDX quotes in Yahoo Spark batches
+        run: python scripts/update_quotes_full.py --batch-size 35 --fallback-limit 40
+      - name: Commit quotes.json
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/quotes.json
+          if git diff --cached --quiet; then
+            echo "No quote changes."
+            exit 0
+          fi
+          git commit -m "chore(full-idx): refresh 5-minute quotes"
+          for attempt in 1 2 3; do
+            git pull --rebase origin main && git push && exit 0
+            git rebase --abort || true
+            sleep $((attempt * 4))
+          done
+          exit 1

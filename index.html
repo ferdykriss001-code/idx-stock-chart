@@ -122,7 +122,7 @@
           <form class="ticker-form" id="ticker-form">
             <label for="ticker">Ticker IDX</label>
             <div class="symbol-input">
-              <input id="ticker" value="BKSL" maxlength="10" autocomplete="off" spellcheck="false" aria-label="Kode saham IDX">
+              <input id="ticker" value="BKSL" maxlength="10" autocomplete="off" spellcheck="false" aria-label="Kode saham IDX" list="ticker-options"><datalist id="ticker-options"></datalist>
               <button type="submit">Tampilkan</button>
             </div>
           </form>
@@ -132,7 +132,7 @@
             <button type="button" data-timeframe="1M">1M</button>
           </div>
           <button class="reload" type="button" id="reload">↻ Perbarui data</button>
-          <span class="status" id="status" aria-live="polite">Menunggu data…</span>
+          <span class="status" id="status" aria-live="polite">Menunggu data…</span><span class="data-badge" id="universe-badge">Full IDX • memuat daftar…</span>
           <div class="indicator-controls" id="indicator-controls" aria-label="Tampilkan atau sembunyikan indikator">
             <strong>Indikator</strong>
             <label class="indicator-toggle"><input type="checkbox" data-indicator="ma20" checked> MA20</label>
@@ -224,14 +224,14 @@
               <div class="level-title"><span style="color:#d8b75d">Fibonacci</span><span>Retracement</span></div>
               <div id="fibonacci-list"></div>
             </div>
-            <p class="method"><b>Cara hitung:</b> swing high/low dikelompokkan memakai rentang ATR. Gap ditandai bila rentang harga antar-candle lebih besar dari ambang volatilitas. Fibonacci dihitung otomatis dari swing high dan swing low utama pada maksimal 120 candle terakhir.</p>
+            <p class="method"><b>Cara hitung:</b> R1/S1 mengutamakan pivot valid terdekat dari 90 candle terakhir, lalu dikombinasikan dengan cluster swing historis berbasis ATR untuk R2–R4/S2–S4. Gap ditandai bila rentang harga antar-candle lebih besar dari ambang volatilitas. Fibonacci dihitung otomatis dari swing high dan swing low utama pada maksimal 120 candle terakhir.</p>
             <div class="watchlist" id="watchlist" aria-label="Pilihan ticker"></div>
           </aside>
         </div>
       </section>
 
       <footer>
-        <span>Data harga V3: Yahoo Finance 5 menit + satu market.json • Chart engine: <a href="https://www.tradingview.com/" target="_blank" rel="noopener">TradingView Lightweight Charts™</a></span>
+        <span>Data harga V3 Full IDX: Yahoo Finance 5 menit (quotes.json) + candle harian per ticker • Chart engine: <a href="https://www.tradingview.com/" target="_blank" rel="noopener">TradingView Lightweight Charts™</a></span>
         <span>Level otomatis = alat bantu, bukan jaminan harga berbalik.</span>
       </footer>
     </main>
@@ -369,41 +369,122 @@
         return bars;
       }
 
-      async function fetchMarketStock(symbol) {
-        var response = await fetch("data/market.json?ts=" + Date.now(), { cache: "no-store" });
-        if (!response.ok) throw new Error("market.json belum tersedia (HTTP " + response.status + ").");
-        var market = await response.json();
-        if (!market || Number(market.version) < 3 || !market.stocks) throw new Error("Format market.json bukan V3.");
-        var stock = market.stocks[symbol];
-        if (!stock) throw new Error("Ticker " + symbol + " belum tercantum pada market.json.");
-        var daily = stock.daily || null;
-        if (!daily || !(daily.bars || []).length) {
-          var refresh = market.refresh && market.refresh.daily;
-          var lastError = refresh && refresh.results && refresh.results.find(function (r) { return r.symbol === symbol && !r.success; });
-          throw new Error("Candle harian " + symbol + " belum tersedia" + (lastError && lastError.error ? ": " + lastError.error : ". Jalankan workflow V3 daily.") );
+      var tickerUniverse = [];
+
+      async function loadTickerUniverse() {
+        try {
+          var response = await fetch("config/tickers.json?ts=" + Date.now(), { cache: "no-store" });
+          if (!response.ok) throw new Error("HTTP " + response.status);
+          var cfg = await response.json();
+          tickerUniverse = (cfg.all || []).map(function (s) { return String(s).toUpperCase(); });
+          var names = cfg.names || {};
+          Object.keys(names).forEach(function (symbol) {
+            if (names[symbol]) companies[symbol] = names[symbol];
+          });
+          var datalist = document.getElementById("ticker-options");
+          if (datalist) datalist.innerHTML = tickerUniverse.map(function (symbol) {
+            return '<option value="' + symbol + '">' + (companies[symbol] || "") + '</option>';
+          }).join("");
+          var badge = document.getElementById("universe-badge");
+          if (badge) {
+            var official = Number(cfg.officialSyncCount || 0);
+            badge.textContent = "Full IDX • " + tickerUniverse.length + " ticker" + (official ? " • IDX sync " + official : " • bootstrap");
+          }
+        } catch (error) {
+          var badge = document.getElementById("universe-badge");
+          if (badge) badge.textContent = "Full IDX • daftar lokal";
         }
-        var bars = normalizeBars(daily.bars);
-        var intraday = stock.intraday || null;
+      }
+
+      async function fetchJsonNoCache(path) {
+        var response = await fetch(path + (path.indexOf("?") >= 0 ? "&" : "?") + "ts=" + Date.now(), { cache: "no-store" });
+        if (!response.ok) throw new Error(path + " HTTP " + response.status);
+        return response.json();
+      }
+
+      function mergeQuoteIntoDaily(dailyBars, quote) {
+        if (!quote || !quote.day || !Number.isFinite(Number(quote.close))) return dailyBars.slice();
+        var day = String(quote.day).slice(0, 10);
+        var existing = dailyBars.find(function (bar) { return bar.time === day; });
+        var row = {
+          time: day,
+          timestamp: Number(quote.latestCandleTime) || (existing && existing.timestamp) || Math.floor(new Date(day + "T00:00:00Z").getTime()/1000),
+          open: Number.isFinite(Number(quote.open)) ? Number(quote.open) : (existing ? existing.open : Number(quote.close)),
+          high: Number.isFinite(Number(quote.high)) ? Number(quote.high) : (existing ? existing.high : Number(quote.close)),
+          low: Number.isFinite(Number(quote.low)) ? Number(quote.low) : (existing ? existing.low : Number(quote.close)),
+          close: Number(quote.close),
+          volume: Number.isFinite(Number(quote.volume)) ? Number(quote.volume) : (existing ? existing.volume : 0)
+        };
+        var merged = dailyBars.filter(function (bar) { return bar.time !== day; });
+        merged.push(row);
+        merged.sort(function (a,b) { return a.time.localeCompare(b.time); });
+        return merged;
+      }
+
+      async function fetchLegacyMarketStock(symbol) {
+        var market = await fetchJsonNoCache("data/market.json");
+        if (!market || Number(market.version) < 3 || !market.stocks) throw new Error("Legacy market.json invalid.");
+        var stock = market.stocks[symbol];
+        if (!stock || !stock.daily || !(stock.daily.bars || []).length) throw new Error("Legacy daily candle tidak tersedia.");
+        return {
+          bars: normalizeBars(stock.daily.bars),
+          meta: stock.meta || {},
+          updatedAt: stock.daily.updatedAt || null,
+          legacyIntraday: stock.intraday || null
+        };
+      }
+
+      async function fetchMarketStock(symbol) {
+        var dailyRecord = null;
+        var legacy = null;
+        try {
+          dailyRecord = await fetchJsonNoCache("data/daily/" + symbol + ".json");
+        } catch (dailyError) {
+          try {
+            legacy = await fetchLegacyMarketStock(symbol);
+          } catch (legacyError) {
+            throw new Error("Candle harian " + symbol + " belum dibuat. Jalankan workflow “V3 Full IDX - Refresh daily candles”.");
+          }
+        }
+
+        var bars = dailyRecord ? normalizeBars(dailyRecord.bars) : legacy.bars;
+        var meta = dailyRecord ? (dailyRecord.meta || {}) : (legacy.meta || {});
+        var updatedAt = dailyRecord ? (dailyRecord.updatedAt || null) : (legacy.updatedAt || null);
         var intradayUpdatedAt = null;
-        if (intraday && (intraday.bars || []).length) {
-          var intradayBars = (intraday.bars || []).map(function (bar) {
+        var latestPrice = null;
+
+        try {
+          var quoteBook = await fetchJsonNoCache("data/quotes.json");
+          var quote = quoteBook && quoteBook.quotes ? quoteBook.quotes[symbol] : null;
+          if (quote) {
+            bars = mergeQuoteIntoDaily(bars, quote);
+            intradayUpdatedAt = quote.updatedAt || quoteBook.updatedAt || null;
+            latestPrice = Number(quote.close);
+          }
+        } catch (quoteError) {}
+
+        // During migration, keep the old intraday data as a fallback.
+        if (!intradayUpdatedAt && legacy && legacy.legacyIntraday && (legacy.legacyIntraday.bars || []).length) {
+          var oldIntraday = legacy.legacyIntraday;
+          var intradayBars = (oldIntraday.bars || []).map(function (bar) {
             var open=Number(bar.open), high=Number(bar.high), low=Number(bar.low), close=Number(bar.close), volume=Number(bar.volume);
             if (![open,high,low,close].every(Number.isFinite) || !bar.day) return null;
             return { day:String(bar.day).slice(0,10), time:Number(bar.time), open:open, high:high, low:low, close:close, volume:Number.isFinite(volume)?volume:0 };
           }).filter(Boolean);
           if (intradayBars.length) {
             bars = mergeIntradayIntoDaily(bars, intradayBars);
-            intradayUpdatedAt = intraday.updatedAt || null;
+            intradayUpdatedAt = oldIntraday.updatedAt || null;
+            latestPrice = Number(oldIntraday.latestPrice);
           }
         }
+
         return {
           bars: bars,
-          meta: stock.meta || {},
-          updatedAt: daily.updatedAt || null,
+          meta: meta,
+          updatedAt: updatedAt,
           intradayUpdatedAt: intradayUpdatedAt,
-          latestPrice: intraday ? Number(intraday.latestPrice) : null,
-          source: intradayUpdatedAt ? "Yahoo Finance 5m + daily • V3" : "Yahoo Finance daily • V3",
-          refresh: market.refresh || {}
+          latestPrice: latestPrice,
+          source: intradayUpdatedAt ? "Yahoo Finance 5m quotes + daily • Full IDX" : "Yahoo Finance daily • Full IDX"
         };
       }
 
@@ -548,22 +629,174 @@
           return index === 0 || Math.abs(level.price - all[index - 1].price) > tolerance * 0.55;
         });
       }
-      function calculateLevels(bars) {
-        var price = bars[bars.length - 1].close, currentATR = atr(bars, 14), tolerance = Math.max(currentATR, price * 0.012, 1);
-        var clusters = levelClusters(bars, currentATR);
-        var supports = uniqueLevels(clusters.filter(function (cluster) { return cluster.price < price - tolerance * 0.32; }).sort(function (a, b) { return b.price - a.price; }), tolerance);
-        var resistances = uniqueLevels(clusters.filter(function (cluster) { return cluster.price > price + tolerance * 0.32; }).sort(function (a, b) { return a.price - b.price; }), tolerance);
-        function fill(levels, direction) {
-          var target = 4, distance = 1;
-          while (levels.length < target) {
-            var candidate = roundTick(price + direction * currentATR * (distance * 1.7 + 0.7));
-            var exists = levels.some(function (level) { return Math.abs(level.price - candidate) < tolerance * 0.6; });
-            if (!exists && candidate > 0) levels.push({ price: candidate, count: 0, score: 0, inferred: true });
-            distance += 1;
+      function recentPivotLevels(bars, currentATR) {
+        var sample = bars.slice(-90);
+        var windowSize = 2;
+        var points = [];
+        if (sample.length < windowSize * 2 + 1) return points;
+
+        var volumes = sample.map(function (bar) { return Number(bar.volume) || 0; });
+        var averageVolume = volumes.reduce(function (sum, value) { return sum + value; }, 0) / Math.max(volumes.length, 1);
+
+        for (var i = windowSize; i < sample.length - windowSize; i++) {
+          var bar = sample[i];
+          var isHigh = true, isLow = true;
+
+          for (var j = i - windowSize; j <= i + windowSize; j++) {
+            if (j === i) continue;
+            if (sample[j].high >= bar.high) isHigh = false;
+            if (sample[j].low <= bar.low) isLow = false;
           }
+
+          if (!isHigh && !isLow) continue;
+
+          var recency = 1 + (i / sample.length) * 2;
+          var volumeRatio = averageVolume > 0 ? Math.min(2, (Number(bar.volume) || 0) / averageVolume) : 1;
+          var weight = recency + volumeRatio * 0.35;
+
+          if (isHigh) points.push({
+            price: roundTick(bar.high),
+            count: 1,
+            score: weight,
+            highCount: 1,
+            lowCount: 0,
+            recent: true,
+            time: bar.time
+          });
+
+          if (isLow) points.push({
+            price: roundTick(bar.low),
+            count: 1,
+            score: weight,
+            highCount: 0,
+            lowCount: 1,
+            recent: true,
+            time: bar.time
+          });
+        }
+
+        return points;
+      }
+
+      function mergeLevelCandidates(levels, tolerance) {
+        var merged = [];
+        levels
+          .slice()
+          .sort(function (a, b) { return a.price - b.price; })
+          .forEach(function (level) {
+            var target = null;
+            var bestDistance = Infinity;
+
+            merged.forEach(function (candidate) {
+              var distance = Math.abs(candidate.price - level.price);
+              if (distance <= tolerance && distance < bestDistance) {
+                target = candidate;
+                bestDistance = distance;
+              }
+            });
+
+            if (!target) {
+              merged.push({
+                price: level.price,
+                count: level.count || 1,
+                score: level.score || 0,
+                highCount: level.highCount || 0,
+                lowCount: level.lowCount || 0,
+                recent: !!level.recent,
+                inferred: !!level.inferred
+              });
+              return;
+            }
+
+            var oldWeight = Math.max(target.score, 0.5);
+            var newWeight = Math.max(level.score || 0, 0.5);
+            target.price = roundTick((target.price * oldWeight + level.price * newWeight) / (oldWeight + newWeight));
+            target.count += level.count || 1;
+            target.score += level.score || 0;
+            target.highCount += level.highCount || 0;
+            target.lowCount += level.lowCount || 0;
+            target.recent = target.recent || !!level.recent;
+          });
+
+        return merged;
+      }
+
+      function calculateLevels(bars) {
+        var price = bars[bars.length - 1].close;
+        var currentATR = atr(bars, 14);
+        var tolerance = Math.max(currentATR, price * 0.012, 1);
+        var mergeTolerance = Math.max(currentATR * 0.62, price * 0.008, 1);
+        var minimumDistance = Math.max(currentATR * 0.30, price * 0.009, 1);
+
+        /* Major historical clusters remain useful, but recent pivots are added
+           so R1/S1 represent the nearest technically valid level first. */
+        var historical = levelClusters(bars, currentATR);
+        var recent = recentPivotLevels(bars, currentATR);
+        var candidates = mergeLevelCandidates(historical.concat(recent), mergeTolerance);
+
+        var supports = candidates
+          .filter(function (level) {
+            return level.price < price - minimumDistance &&
+              ((level.lowCount || 0) > 0 || level.recent);
+          })
+          .sort(function (a, b) {
+            var distanceA = price - a.price;
+            var distanceB = price - b.price;
+            if (Math.abs(distanceA - distanceB) > mergeTolerance * 0.25) return distanceA - distanceB;
+            return (b.score || 0) - (a.score || 0);
+          });
+
+        var resistances = candidates
+          .filter(function (level) {
+            return level.price > price + minimumDistance &&
+              ((level.highCount || 0) > 0 || level.recent);
+          })
+          .sort(function (a, b) {
+            var distanceA = a.price - price;
+            var distanceB = b.price - price;
+            if (Math.abs(distanceA - distanceB) > mergeTolerance * 0.25) return distanceA - distanceB;
+            return (b.score || 0) - (a.score || 0);
+          });
+
+        supports = uniqueLevels(supports, tolerance);
+        resistances = uniqueLevels(resistances, tolerance);
+
+        function fill(levels, direction) {
+          var target = 4;
+          var step = 1;
+
+          while (levels.length < target && step <= 12) {
+            /* Fallback only. Start close to price instead of jumping several ATR. */
+            var multiplier = 0.85 + (step - 1) * 0.85;
+            var candidate = roundTick(price + direction * currentATR * multiplier);
+            var validSide = direction > 0 ? candidate > price + minimumDistance : candidate < price - minimumDistance;
+            var exists = levels.some(function (level) {
+              return Math.abs(level.price - candidate) < mergeTolerance * 0.8;
+            });
+
+            if (validSide && !exists && candidate > 0) {
+              levels.push({
+                price: candidate,
+                count: 0,
+                score: 0,
+                inferred: true,
+                recent: true
+              });
+            }
+            step += 1;
+          }
+
+          levels.sort(function (a, b) {
+            return direction > 0 ? a.price - b.price : b.price - a.price;
+          });
           return levels.slice(0, target);
         }
-        return { supports: fill(supports, -1), resistances: fill(resistances, 1), atr: currentATR };
+
+        return {
+          supports: fill(supports, -1),
+          resistances: fill(resistances, 1),
+          atr: currentATR
+        };
       }
       function detectGaps(bars) {
         var minimum = Math.max(atr(bars, 14) * 0.2, bars[bars.length - 1].close * 0.003, 1);
@@ -863,7 +1096,7 @@
         };
       });
       setupIndicatorControls();
-      load(true);
+      loadTickerUniverse().finally(function () { load(true); });
       setInterval(function () { if (!document.hidden) load(true); }, 300000);
     }());
   </script>

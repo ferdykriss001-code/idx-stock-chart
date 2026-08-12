@@ -1,0 +1,17 @@
+UPLOAD V3 FULL IDX
+
+1. Ekstrak ZIP.
+2. Upload SEMUA ISI folder ke root repository idx-stock-chart.
+3. Commit directly to main.
+4. Buka Actions.
+5. Jalankan: V3 Full IDX - Sync ticker universe.
+6. Setelah hijau, jalankan: V3 Full IDX - Refresh daily candles.
+7. Setelah hijau, jalankan: V3 Full IDX - Refresh 5-minute quotes.
+8. Tunggu GitHub Pages deployment hijau.
+9. Buka website lalu Ctrl+Shift+R.
+
+PENTING:
+- Jangan menjalankan workflow V3 lama bersamaan. Paket ini sudah menggantinya.
+- Daily workflow pertama bisa lebih lama karena membuat histori untuk ratusan ticker.
+- Ticker yang Yahoo Finance tidak dukung akan tetap ada di daftar IDX, tetapi chart-nya
+  akan menampilkan pesan data Yahoo belum tersedia.

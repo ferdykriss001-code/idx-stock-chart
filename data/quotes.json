@@ -1,0 +1,11 @@
+{
+  "version": 3.2,
+  "schema": "idx-full-quotes-v1",
+  "updatedAt": null,
+  "quotes": {},
+  "refresh": {
+    "tickerCount": 881,
+    "successCount": 0,
+    "failedCount": 881
+  }
+}

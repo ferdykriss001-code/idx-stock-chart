@@ -953,5 +953,7 @@
   "additional": [
     "JGLE"
   ],
-  "names": {}
+  "names": {},
+  "lastSyncError": "Official IDX scrape returned only 50 symbols; kept existing 881 bootstrap/previous symbols.",
+  "lastSyncAttemptAt": "2026-08-13T05:53:11.115576+00:00"
 }

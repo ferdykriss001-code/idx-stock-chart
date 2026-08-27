@@ -1,0 +1,47 @@
+name: Manual - Update one IDX ticker from Yahoo
+
+on:
+  workflow_dispatch:
+    inputs:
+      ticker:
+        description: 'Kode saham IDX, contoh BUMI / BBCA / JGLE'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: manual-ticker-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Update selected ticker only
+        run: python scripts/update_one_ticker.py '${{ inputs.ticker }}'
+      - name: Commit selected ticker
+        run: |
+          SYMBOL=$(echo '${{ inputs.ticker }}' | tr '[:lower:]' '[:upper:]' | sed 's/\.JK$//')
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add data/quotes.json "data/daily/${SYMBOL}.json"
+          if git diff --cached --quiet; then
+            echo 'No changes to commit.'
+            exit 0
+          fi
+          git commit -m "data(manual): update ${SYMBOL} from Yahoo"
+          for attempt in 1 2 3; do
+            git pull --rebase origin main && git push && exit 0
+            git rebase --abort || true
+            sleep $((attempt * 3))
+          done
+          exit 1

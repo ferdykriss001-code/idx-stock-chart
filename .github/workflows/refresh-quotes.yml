@@ -1,52 +1,28 @@
-name: Active 100 - Refresh 5-minute Yahoo quotes
+name: Active 100 - Yahoo 5-minute quotes
 
 on:
   workflow_dispatch:
   schedule:
-    # Every 10 minutes during broad IDX trading hours on weekdays.
-    # GitHub scheduler may queue a run; only 100 active tickers are processed.
+    # Every 10 minutes, weekdays. UTC 01:00-10:59 covers the IDX session + margin.
     - cron: "*/10 1-10 * * 1-5"
+  push:
+    branches: [main]
+    paths:
+      - "scripts/update_active100_quotes.py"
+      - "config/tickers.json"
+      - ".github/workflows/refresh-quotes.yml"
 
 permissions:
   contents: write
 
 concurrency:
-  group: active-100-quotes
+  group: active100-yahoo-quotes
   cancel-in-progress: false
 
 jobs:
-  build:
+  refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [0, 1, 2, 3]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Refresh active-100 shard ${{ matrix.shard }}
-        run: |
-          mkdir -p build/quotes
-          python scripts/update_quotes_full.py \
-            --shard-index ${{ matrix.shard }} \
-            --shard-count 4 \
-            --batch-size 25 \
-            --fallback-limit 5 \
-            --out build/quotes/quotes-shard-${{ matrix.shard }}.json
-      - uses: actions/upload-artifact@v4
-        with:
-          name: active100-quotes-${{ matrix.shard }}
-          path: build/quotes/quotes-shard-${{ matrix.shard }}.json
-          retention-days: 1
-
-  merge:
-    needs: build
-    if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
         with:
@@ -54,26 +30,43 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: active100-quotes-*
-          path: build/quotes
-          merge-multiple: true
-      - name: Merge fresh quotes
-        run: python scripts/merge_quote_shards.py --input-dir build/quotes
-      - name: Commit quotes.json
+
+      - name: Fetch 100 active IDX tickers from Yahoo
+        run: python scripts/update_active100_quotes.py
+
+      - name: Validate DSSA and refresh result
+        run: |
+          python - <<'PY'
+          import json
+          from datetime import datetime
+          from zoneinfo import ZoneInfo
+          d=json.load(open('data/quotes.json', encoding='utf-8'))
+          r=d.get('refresh') or {}
+          print('Refresh:', r)
+          q=(d.get('quotes') or {}).get('DSSA')
+          if not q:
+              raise SystemExit('DSSA missing from quotes.json')
+          print('DSSA:', q.get('day'), q.get('close'), q.get('latestCandleTime'))
+          print('Generated:', datetime.fromtimestamp(d['updatedAt'], ZoneInfo('Asia/Jakarta')).isoformat())
+          if int(r.get('successCount') or 0) < 50:
+              raise SystemExit('Too few successful tickers')
+          PY
+
+      - name: Commit fresh quotes.json
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data/quotes.json
           if git diff --cached --quiet; then
-            echo "No quote changes."
+            echo "No quote changes to commit."
             exit 0
           fi
-          git commit -m "chore(active100): refresh Yahoo 5-minute quotes"
-          for attempt in 1 2 3; do
-            git pull --rebase origin main && git push && exit 0
+          git commit -m "data(active100): refresh Yahoo 5-minute quotes"
+          for attempt in 1 2 3 4; do
+            if git pull --rebase origin main && git push origin main; then
+              exit 0
+            fi
             git rebase --abort || true
-            sleep $((attempt * 4))
+            sleep $((attempt * 5))
           done
           exit 1

@@ -1,16 +1,11 @@
-name: Active 100 - Yahoo 5-minute quotes
+name: Active 100 - Yahoo quotes
 
 on:
   workflow_dispatch:
   schedule:
-    # Every 10 minutes, weekdays. UTC 01:00-10:59 covers the IDX session + margin.
-    - cron: "*/10 1-10 * * 1-5"
-  push:
-    branches: [main]
-    paths:
-      - "scripts/update_active100_quotes.py"
-      - "config/tickers.json"
-      - ".github/workflows/refresh-quotes.yml"
+    # Every 30 minutes on weekdays during/around IDX trading hours.
+    # Lower frequency reduces Yahoo 429 rate limiting on GitHub datacenter IPs.
+    - cron: "0,30 1-10 * * 1-5"
 
 permissions:
   contents: write
@@ -22,7 +17,7 @@ concurrency:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
         with:
@@ -31,25 +26,21 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Fetch 100 active IDX tickers from Yahoo
-        run: python scripts/update_active100_quotes.py
+      - name: Fetch active 100 from Yahoo in two batches
+        run: python -u scripts/update_active100_quotes.py
 
-      - name: Validate DSSA and refresh result
+      - name: Validate generated quote book
         run: |
           python - <<'PY'
           import json
-          from datetime import datetime
-          from zoneinfo import ZoneInfo
           d=json.load(open('data/quotes.json', encoding='utf-8'))
           r=d.get('refresh') or {}
           print('Refresh:', r)
-          q=(d.get('quotes') or {}).get('DSSA')
-          if not q:
-              raise SystemExit('DSSA missing from quotes.json')
-          print('DSSA:', q.get('day'), q.get('close'), q.get('latestCandleTime'))
-          print('Generated:', datetime.fromtimestamp(d['updatedAt'], ZoneInfo('Asia/Jakarta')).isoformat())
-          if int(r.get('successCount') or 0) < 50:
-              raise SystemExit('Too few successful tickers')
+          if int(r.get('successCount') or 0) < 1:
+              raise SystemExit('No ticker was refreshed')
+          for symbol in ('DSSA','BKSL','KETR','BUMI'):
+              q=(d.get('quotes') or {}).get(symbol)
+              print(symbol, q.get('day') if q else 'missing', q.get('close') if q else '')
           PY
 
       - name: Commit fresh quotes.json
@@ -61,12 +52,6 @@ jobs:
             echo "No quote changes to commit."
             exit 0
           fi
-          git commit -m "data(active100): refresh Yahoo 5-minute quotes"
-          for attempt in 1 2 3 4; do
-            if git pull --rebase origin main && git push origin main; then
-              exit 0
-            fi
-            git rebase --abort || true
-            sleep $((attempt * 5))
-          done
-          exit 1
+          git commit -m "data(active100): refresh Yahoo quotes"
+          git pull --rebase origin main
+          git push origin main

@@ -1,10 +1,7 @@
-name: V3 Full IDX - Sync ticker universe
+name: Legacy Full IDX - Sync ticker universe (manual only)
 
 on:
   workflow_dispatch:
-  schedule:
-    # Once daily, 07:10 WIB
-    - cron: "10 0 * * *"
 
 permissions:
   contents: write
@@ -40,6 +37,6 @@ jobs:
             echo "Ticker universe unchanged."
             exit 0
           fi
-          git commit -m "chore(full-idx): sync official IDX ticker universe"
+          git commit -m "chore(full-idx): sync official IDX ticker universe manually"
           git pull --rebase origin main
           git push

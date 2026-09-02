@@ -1,13 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import json
-import math
-import random
-import time
-import urllib.parse
-import urllib.request
-import urllib.error
+import json, math, random, time, urllib.parse, urllib.request, urllib.error
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -22,225 +16,106 @@ HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
-
-def finite(v):
-    return isinstance(v, (int, float)) and math.isfinite(v)
-
+def finite(v): return isinstance(v,(int,float)) and math.isfinite(v)
 
 def active_tickers():
-    cfg = json.loads(CONFIG.read_text(encoding="utf-8"))
-    symbols = cfg.get("all") or cfg.get("active100") or []
-    symbols = [str(x).upper().strip().replace(".JK", "") for x in symbols if str(x).strip()]
-    symbols = list(dict.fromkeys(symbols))
-    if not symbols:
-        raise RuntimeError("config/tickers.json contains no active tickers")
-    if len(symbols) > 120:
-        raise RuntimeError(f"Safety stop: expected <=120 active tickers, got {len(symbols)}")
+    cfg=json.loads(CONFIG.read_text(encoding="utf-8"))
+    symbols=cfg.get("all") or cfg.get("active100") or []
+    symbols=[str(x).upper().strip().replace(".JK","") for x in symbols if str(x).strip()]
+    symbols=list(dict.fromkeys(symbols))
+    if not symbols: raise RuntimeError("No active tickers")
+    if len(symbols)>120: raise RuntimeError(f"Safety stop: {len(symbols)} tickers")
     return symbols
 
+def chunks(items,size):
+    for i in range(0,len(items),size): yield items[i:i+size]
 
-def chunks(items, size):
-    for i in range(0, len(items), size):
-        yield items[i:i + size]
+def get_json(url,timeout=25):
+    req=urllib.request.Request(url,headers=HEADERS)
+    with urllib.request.urlopen(req,timeout=timeout) as r: return json.load(r)
 
+def parse(symbol,response):
+    if not response: return None
+    ts=response.get("timestamp") or []
+    q=((response.get("indicators") or {}).get("quote") or [{}])[0]
+    rows=[]
+    for i,stamp in enumerate(ts):
+        vals=[]
+        for key in ("open","high","low","close"):
+            a=q.get(key) or []; vals.append(a[i] if i<len(a) else None)
+        if not all(finite(v) for v in vals): continue
+        va=q.get("volume") or []; vol=va[i] if i<len(va) else 0
+        day=datetime.fromtimestamp(stamp).astimezone(JAKARTA).strftime("%Y-%m-%d")
+        rows.append({"time":int(stamp),"day":day,"open":vals[0],"high":vals[1],"low":vals[2],"close":vals[3],"volume":vol if finite(vol) else 0})
+    if not rows: return None
+    day=rows[-1]["day"]; session=[r for r in rows if r["day"]==day]
+    if not session: return None
+    now=int(time.time())
+    return {"symbol":symbol,"updatedAt":now,"latestCandleTime":session[-1]["time"],"day":day,"open":session[0]["open"],"high":max(r["high"] for r in session),"low":min(r["low"] for r in session),"close":session[-1]["close"],"volume":sum((r["volume"] or 0) for r in session),"bars":session}
 
-def get_json(url, timeout=30):
-    req = urllib.request.Request(url, headers=HEADERS)
-    with urllib.request.urlopen(req, timeout=timeout) as response:
-        return json.load(response)
-
-
-def parse(symbol, response):
-    if not response:
-        return None
-    timestamps = response.get("timestamp") or []
-    quote = ((response.get("indicators") or {}).get("quote") or [{}])[0]
-    rows = []
-    for i, stamp in enumerate(timestamps):
-        values = []
-        for key in ("open", "high", "low", "close"):
-            arr = quote.get(key) or []
-            values.append(arr[i] if i < len(arr) else None)
-        if not all(finite(v) for v in values):
-            continue
-        volumes = quote.get("volume") or []
-        volume = volumes[i] if i < len(volumes) else 0
-        dt = datetime.fromtimestamp(stamp).astimezone(JAKARTA)
-        rows.append({
-            "time": int(stamp),
-            "day": dt.strftime("%Y-%m-%d"),
-            "open": values[0],
-            "high": values[1],
-            "low": values[2],
-            "close": values[3],
-            "volume": volume if finite(volume) else 0,
-        })
-    if not rows:
-        return None
-    latest_day = rows[-1]["day"]
-    session = [row for row in rows if row["day"] == latest_day]
-    if not session:
-        return None
-    now = int(time.time())
-    return {
-        "symbol": symbol,
-        "updatedAt": now,
-        "latestCandleTime": session[-1]["time"],
-        "day": latest_day,
-        "open": session[0]["open"],
-        "high": max(r["high"] for r in session),
-        "low": min(r["low"] for r in session),
-        "close": session[-1]["close"],
-        "volume": sum((r["volume"] or 0) for r in session),
-        "bars": session,
-    }
-
-
-def fetch_spark_batch(symbols):
-    joined = ",".join(f"{s}.JK" for s in symbols)
-    params = urllib.parse.urlencode({
-        "symbols": joined,
-        "range": "5d",
-        "interval": "5m",
-    })
-    errors = []
-    for attempt in range(4):
-        for host in ("query1.finance.yahoo.com", "query2.finance.yahoo.com"):
-            url = f"https://{host}/v7/finance/spark?{params}"
+def fetch_batch(symbols):
+    joined=",".join(f"{s}.JK" for s in symbols)
+    params=urllib.parse.urlencode({"symbols":joined,"range":"5d","interval":"5m"})
+    errors=[]
+    # Two hosts only; one retry cycle. Avoid long cooldown loops that hit workflow timeout.
+    for attempt in range(2):
+        for host in ("query1.finance.yahoo.com","query2.finance.yahoo.com"):
             try:
-                payload = get_json(url)
-                spark = payload.get("spark") or {}
-                if spark.get("error"):
-                    raise RuntimeError(str(spark["error"]))
-                result = spark.get("result") or []
-                if not result:
-                    raise RuntimeError("empty spark result")
-                return result
+                payload=get_json(f"https://{host}/v7/finance/spark?{params}")
+                spark=payload.get("spark") or {}
+                if spark.get("error"): raise RuntimeError(str(spark["error"]))
+                result=spark.get("result") or []
+                if result: return result
+                raise RuntimeError("empty spark result")
             except urllib.error.HTTPError as exc:
                 errors.append(f"{host}: HTTP {exc.code}")
-                if exc.code == 429:
-                    retry_after = exc.headers.get("Retry-After")
-                    try:
-                        wait = max(8, min(45, int(retry_after))) if retry_after else 12 + attempt * 8
-                    except Exception:
-                        wait = 12 + attempt * 8
-                    print(f"Yahoo 429 for batch {symbols[0]}..{symbols[-1]}; cooldown {wait}s")
-                    time.sleep(wait)
             except Exception as exc:
                 errors.append(f"{host}: {exc}")
-        time.sleep(3 + attempt * 3 + random.random() * 2)
-    raise RuntimeError(" | ".join(errors[-6:]))
-
-
-def fetch_one(symbol):
-    errors = []
-    for host in ("query1.finance.yahoo.com", "query2.finance.yahoo.com"):
-        url = f"https://{host}/v8/finance/chart/{symbol}.JK?range=5d&interval=5m&includePrePost=false&events=history"
-        try:
-            payload = get_json(url)
-            results = ((payload.get("chart") or {}).get("result") or [])
-            if results:
-                return parse(symbol, results[0])
-        except Exception as exc:
-            errors.append(str(exc))
-    return None
-
+        if attempt==0:
+            wait=25+random.randint(0,5)
+            print(f"Batch {symbols[0]}..{symbols[-1]} retry after {wait}s", flush=True)
+            time.sleep(wait)
+    raise RuntimeError(" | ".join(errors[-4:]))
 
 def load_old():
     try:
-        old = json.loads(OUT.read_text(encoding="utf-8"))
-        if not isinstance(old.get("quotes"), dict):
-            raise ValueError("invalid old quote book")
-        return old
+        old=json.loads(OUT.read_text(encoding="utf-8"))
+        return old if isinstance(old.get("quotes"),dict) else {"quotes":{}}
     except Exception:
-        return {"quotes": {}}
-
+        return {"quotes":{}}
 
 def main():
-    symbols = active_tickers()
-    old = load_old()
-    quotes = dict(old.get("quotes") or {})
-    successes = {}
-    failures = set(symbols)
+    symbols=active_tickers(); old=load_old(); quotes=dict(old.get("quotes") or {})
+    successes={}; failures=set(symbols)
+    print(f"Refreshing {len(symbols)} tickers as 2 batches of 50", flush=True)
 
-    print(f"Refreshing {len(symbols)} active IDX tickers in Yahoo Spark batches of 20")
-
-    for batch_no, group in enumerate(chunks(symbols, 20), start=1):
-        print(f"BATCH {batch_no}: {group[0]}..{group[-1]} ({len(group)} tickers)")
+    for no,group in enumerate(chunks(symbols,50),1):
+        print(f"BATCH {no}: {group[0]}..{group[-1]}", flush=True)
         try:
-            items = fetch_spark_batch(group)
-            returned = {}
+            items=fetch_batch(group); returned={}
             for item in items:
-                raw_symbol = str(item.get("symbol") or "").upper().replace(".JK", "")
-                response = (item.get("response") or [None])[0]
-                if raw_symbol:
-                    returned[raw_symbol] = response
+                raw=str(item.get("symbol") or "").upper().replace(".JK","")
+                response=(item.get("response") or [None])[0]
+                if raw: returned[raw]=response
             for symbol in group:
-                q = parse(symbol, returned.get(symbol))
+                q=parse(symbol,returned.get(symbol))
                 if q:
-                    successes[symbol] = q
-                    quotes[symbol] = q
-                    failures.discard(symbol)
-                    print(f"OK   {symbol}: {q['day']} close={q['close']}")
+                    successes[symbol]=q; quotes[symbol]=q; failures.discard(symbol)
+            print(f"BATCH {no} success: {sum(1 for s in group if s in successes)}/{len(group)}", flush=True)
         except Exception as exc:
-            print(f"BATCH FAIL {group[0]}..{group[-1]}: {exc}")
-        # Keep the GitHub runner well below Yahoo request pressure.
-        time.sleep(5 + random.random() * 3)
+            print(f"BATCH {no} FAILED: {exc}", flush=True)
+        time.sleep(8)
 
-    # Only a small number of misses get an individual retry. This is deliberately
-    # capped to avoid recreating the 100-request rate-limit problem.
-    retry_symbols = list(sorted(failures))[:8]
-    if retry_symbols:
-        print(f"Individual fallback for at most {len(retry_symbols)} tickers")
-        time.sleep(12)
-        for symbol in retry_symbols:
-            q = fetch_one(symbol)
-            if q:
-                successes[symbol] = q
-                quotes[symbol] = q
-                failures.discard(symbol)
-                print(f"FALLBACK OK {symbol}: {q['day']} close={q['close']}")
-            time.sleep(2)
+    # Publish partial success rather than throwing away an entire run.
+    if not successes:
+        raise SystemExit("Yahoo returned zero fresh tickers; quotes.json unchanged")
 
-    minimum_success = max(40, int(len(symbols) * 0.60))
-    if len(successes) < minimum_success:
-        raise SystemExit(
-            f"Yahoo refresh rejected: only {len(successes)}/{len(symbols)} succeeded; "
-            f"minimum is {minimum_success}. Existing quotes.json left unchanged."
-        )
+    now=int(time.time()); latest_days={}
+    for q in successes.values(): latest_days[q["day"]]=latest_days.get(q["day"],0)+1
+    payload={"version":4.2,"schema":"idx-active100-quotes-v3","updatedAt":now,"refresh":{"tickerCount":len(symbols),"successCount":len(successes),"failedCount":len(failures),"failed":sorted(failures),"latestDays":latest_days,"source":"Yahoo Finance spark v7 batch 50, 5m, 5d"},"quotes":quotes}
+    tmp=OUT.with_suffix(".tmp"); tmp.write_text(json.dumps(payload,ensure_ascii=False,separators=(",",":")),encoding="utf-8"); tmp.replace(OUT)
+    print(f"SUCCESS {len(successes)}/{len(symbols)} latestDays={latest_days}", flush=True)
+    for s in ("DSSA","BKSL","KETR","BUMI"):
+        if s in quotes: print(f"{s}: {quotes[s].get('day')} {quotes[s].get('close')}", flush=True)
 
-    now = int(time.time())
-    latest_days = {}
-    for quote in successes.values():
-        latest_days[quote["day"]] = latest_days.get(quote["day"], 0) + 1
-
-    payload = {
-        "version": 4.1,
-        "schema": "idx-active100-quotes-v2",
-        "updatedAt": now,
-        "refresh": {
-            "tickerCount": len(symbols),
-            "successCount": len(successes),
-            "failedCount": len(failures),
-            "failed": sorted(failures),
-            "latestDays": latest_days,
-            "source": "Yahoo Finance spark v7 batch, 5m, 5d",
-        },
-        "quotes": quotes,
-    }
-
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    tmp = OUT.with_suffix(".tmp")
-    tmp.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
-    tmp.replace(OUT)
-
-    print("---")
-    print(f"SUCCESS {len(successes)}/{len(symbols)}")
-    print(f"LATEST DAYS {json.dumps(latest_days, sort_keys=True)}")
-    if "DSSA" in quotes:
-        q = quotes["DSSA"]
-        print(f"DSSA {q.get('day')} close={q.get('close')} candle={q.get('latestCandleTime')}")
-
-
-if __name__ == "__main__":
-    main()
+if __name__=="__main__": main()

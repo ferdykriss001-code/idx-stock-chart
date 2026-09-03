@@ -1,23 +1,25 @@
-name: Active 100 - Yahoo quotes
+name: Active 100 - Yahoo via VPS proxy
 
 on:
   workflow_dispatch:
   schedule:
-    # Every 30 minutes on weekdays during/around IDX trading hours.
-    # Lower frequency reduces Yahoo 429 rate limiting on GitHub datacenter IPs.
-    - cron: "0,30 1-10 * * 1-5"
+    # Every 15 minutes on weekdays during/around IDX trading hours.
+    - cron: "*/15 1-10 * * 1-5"
 
 permissions:
   contents: write
 
 concurrency:
-  group: active100-yahoo-quotes
-  cancel-in-progress: false
+  group: active100-vps-proxy-quotes
+  cancel-in-progress: true
 
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 5
+    env:
+      MARKET_PROXY_URL: ${{ secrets.MARKET_PROXY_URL }}
+      MARKET_PROXY_TOKEN: ${{ secrets.MARKET_PROXY_TOKEN }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -26,10 +28,15 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Fetch active 100 from Yahoo in two batches
-        run: python -u scripts/update_active100_quotes.py
+      - name: Require private proxy configuration
+        run: |
+          test -n "$MARKET_PROXY_URL" || (echo "Missing GitHub secret MARKET_PROXY_URL" && exit 1)
+          test -n "$MARKET_PROXY_TOKEN" || (echo "Missing GitHub secret MARKET_PROXY_TOKEN" && exit 1)
 
-      - name: Validate generated quote book
+      - name: Fetch Active 100 through VPS Yahoo proxy
+        run: python -u scripts/update_quotes_from_proxy.py
+
+      - name: Validate fresh quote book
         run: |
           python - <<'PY'
           import json
@@ -37,7 +44,7 @@ jobs:
           r=d.get('refresh') or {}
           print('Refresh:', r)
           if int(r.get('successCount') or 0) < 1:
-              raise SystemExit('No ticker was refreshed')
+              raise SystemExit('Proxy returned no fresh tickers')
           for symbol in ('DSSA','BKSL','KETR','BUMI'):
               q=(d.get('quotes') or {}).get(symbol)
               print(symbol, q.get('day') if q else 'missing', q.get('close') if q else '')
@@ -52,6 +59,6 @@ jobs:
             echo "No quote changes to commit."
             exit 0
           fi
-          git commit -m "data(active100): refresh Yahoo quotes"
+          git commit -m "data(active100): refresh Yahoo quotes via VPS"
           git pull --rebase origin main
           git push origin main
